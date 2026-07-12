@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
 # 1. API Key Set Karein 
-os.environ["GROQ_API_KEY"] = "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"
+os.environ["GROQ_API_KEY"] = "key"
 
 # 2. TOOL BANAYEIN
 @tool
