@@ -5,10 +5,13 @@ result = graph.invoke(
     {
         "messages": [
             HumanMessage(
-                content="Show  5 Point summary of sales and outlier in next responce"
+                content="Show top 5 customers by sales and generate a chart."
             )
         ],
-        "trace": []
+        "trace": [],
+    },
+    config={
+        "recursion_limit": 100
     }
 )
 

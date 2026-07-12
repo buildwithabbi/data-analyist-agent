@@ -1,13 +1,52 @@
 from llm import llm
 from tools import TOOLS
 from planner import create_plan
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from context_builder import build_context
+
+
 
 llm_with_tools = llm.bind_tools([*TOOLS])
 
+from groq import BadRequestError
 
+def chatbot(state):
+    print("➡️ Chatbot")
+
+    trace = state.get("trace", [])
+
+    context = build_context(state)
+    trace.append("🧠 Context built")
+
+    messages = [
+        SystemMessage(content=context),
+        *state["messages"],
+    ]
+
+    try:
+        response = llm_with_tools.invoke(messages)
+    except BadRequestError as e:
+        print(f"⚠️ Tool call generation failed: {e}")
+        trace.append(f"⚠️ Malformed tool call, retrying: {e}")
+
+        # Retry once — small models occasionally self-correct on a second pass
+        try:
+            response = llm_with_tools.invoke(messages)
+        except BadRequestError as e2:
+            print(f"❌ Retry also failed: {e2}")
+            trace.append(f"❌ Tool call failed after retry: {e2}")
+            # Fall back to a plain AIMessage so the graph doesn't crash
+            response = AIMessage(
+                content="Sorry, I had trouble formatting that request internally. Could you rephrase or simplify your question?"
+            )
+
+    return {
+        "messages": [response],
+        "trace": trace,
+    }
 
 def planner_node(state):
-
+    print("➡️ Planner")
     question = state["messages"][-1].content
 
     plan = create_plan(question)
@@ -25,23 +64,8 @@ def planner_node(state):
     }
 
 
-def chatbot(state):
-    trace = state.get("trace", [])
 
-    trace.append("🧠 Chatbot node started")
 
-    response = llm_with_tools.invoke(state["messages"])
-
-    if response.tool_calls:
-        tool_name = response.tool_calls[0]["name"]
-        trace.append(f"🔧 Tool requested: {tool_name}")
-    else:
-        trace.append("💬 Generated final answer")
-
-    return {
-        "messages": [response],
-        "trace": trace,
-    }
 
 def reflection_node(state):
 
