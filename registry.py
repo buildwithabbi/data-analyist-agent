@@ -1,5 +1,6 @@
 from tools import TOOLS
 
+
 class ToolRegistry:
 
     def __init__(self):
@@ -18,8 +19,6 @@ class ToolRegistry:
         descriptions = []
 
         for tool in self.tools.values():
-            descriptions.append(
-                f"{tool.name}: {tool.description}"
-            )
+            descriptions.append(f"{tool.name}: {tool.description}")
 
         return "\n".join(descriptions)

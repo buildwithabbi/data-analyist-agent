@@ -24,30 +24,28 @@ CREATE TABLE sales(
 """)
 
 customers = [
-    "Alice", "Bob", "Charlie", "David", "Eva",
-    "Frank", "Grace", "Helen", "Ivan", "Jack"
+    "Alice",
+    "Bob",
+    "Charlie",
+    "David",
+    "Eva",
+    "Frank",
+    "Grace",
+    "Helen",
+    "Ivan",
+    "Jack",
 ]
 
-regions = [
-    "North",
-    "South",
-    "East",
-    "West"
-]
+regions = ["North", "South", "East", "West"]
 
 rows = []
 
 for _ in range(200):
-    rows.append((
-        random.choice(customers),
-        random.choice(regions),
-        random.randint(100, 5000)
-    ))
+    rows.append(
+        (random.choice(customers), random.choice(regions), random.randint(100, 5000))
+    )
 
-cursor.executemany(
-    "INSERT INTO sales VALUES (?, ?, ?)",
-    rows
-)
+cursor.executemany("INSERT INTO sales VALUES (?, ?, ?)", rows)
 cursor.execute("PRAGMA table_info(sales)")
 
 print(cursor.fetchall())

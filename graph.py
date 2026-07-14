@@ -32,6 +32,4 @@ builder.add_conditional_edges(
 # Tool returns to executor
 builder.add_edge("tool", "executor")
 
-graph = builder.compile(
-    name="DataAnalystAgent"
-)
+graph = builder.compile(name="DataAnalystAgent")
