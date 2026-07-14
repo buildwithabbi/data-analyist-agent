@@ -2,24 +2,49 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 
 from state import AgentState
-from nodes import planner_node, executor
+from nodes import (
+    planner_node,
+    executor,
+    reflection_node,
+)
+
 from tools import TOOLS
 from router import route_tools
+from reflection_router import route_reflection
 
 builder = StateGraph(AgentState)
 
+# -----------------------------
 # Nodes
+# -----------------------------
+
 builder.add_node("planner", planner_node)
+
 builder.add_node("executor", executor)
+
 builder.add_node("tool", ToolNode(TOOLS))
 
+builder.add_node("reflection", reflection_node)
+
+
+# -----------------------------
 # Start
-builder.add_edge(START, "planner")
+# -----------------------------
 
-# Planner runs only once
-builder.add_edge("planner", "executor")
+builder.add_edge(
+    START,
+    "planner",
+)
 
-# executor decides
+builder.add_edge(
+    "planner",
+    "executor",
+)
+
+# -----------------------------
+# Executor
+# -----------------------------
+
 builder.add_conditional_edges(
     "executor",
     route_tools,
@@ -29,7 +54,26 @@ builder.add_conditional_edges(
     },
 )
 
-# Tool returns to executor
-builder.add_edge("tool", "executor")
+# -----------------------------
+# Tool
+# -----------------------------
+
+builder.add_edge(
+    "tool",
+    "reflection",
+)
+
+# -----------------------------
+# Reflection
+# -----------------------------
+
+builder.add_conditional_edges(
+    "reflection",
+    route_reflection,
+    {
+        "executor": "executor",
+        "end": END,
+    },
+)
 
 graph = builder.compile(name="DataAnalystAgent")

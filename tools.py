@@ -25,8 +25,6 @@ import sqlite3
 import traceback
 from langchain_core.tools import tool
 
-
-
 DB_PATH = Path(__file__).resolve().parent / "database" / "sales.db"
 
 
@@ -70,9 +68,6 @@ def joke_generator() -> str:
     ]
 
     return random.choice(jokes)
-
-
-
 
 
 @tool

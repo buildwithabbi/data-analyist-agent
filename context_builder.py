@@ -43,4 +43,14 @@ def build_context(state):
                 Only call ONE tool at a time.
                 Wait for the tool result before deciding the next action.
                 Never call multiple dependent tools in one response.
+
+                Tool Usage Rules
+
+                1. Call ONLY ONE tool per response.
+
+                2. Wait for the tool result before deciding the next tool.
+
+                3. Never call multiple dependent tools in the same response.
+
+                4. Think → Tool → Observe → Think Again.
                 """

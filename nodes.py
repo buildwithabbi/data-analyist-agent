@@ -1,67 +1,113 @@
 from langsmith import trace
 
-from llm import llm, safe_invoke
+from llm import llm, safe_invoke, llm_with_tools
 from tools import TOOLS
 from planner import create_plan
 from langchain_core.messages import AIMessage, ToolMessage, SystemMessage
 from context_builder import build_context
 import json
-llm_with_tools = llm.bind_tools([*TOOLS])
+
 
 from groq import BadRequestError
 
 
 from state import AgentState
 
+MAX_RETRIES = 3
+
+
+import json
+
+from groq import BadRequestError
+from langchain_core.messages import SystemMessage, ToolMessage
+
+from context_builder import build_context
+from llm import llm, safe_invoke
+from state import AgentState
+
 
 def executor(state: AgentState) -> dict:
-
     print("➡️ Executor")
 
     trace = [
         *state.get("trace", []),
         "🧠 Context built",
     ]
+
     tool_results = [*state.get("tool_results", [])]
 
-    last_message = state["messages"][-1]
+    # ---------------------------------------------------------
+    # Observe latest tool execution
+    # ---------------------------------------------------------
 
     last_message = state["messages"][-1]
 
-    print(type(last_message))
-
-    if isinstance(last_message, ToolMessage):
-        print(last_message)
-        print(vars(last_message))
-
     if isinstance(last_message, ToolMessage):
 
-        
+        try:
+            payload = json.loads(last_message.content)
 
-        payload = json.loads(last_message.content)
+            tool_results.append(payload)
 
-        tool_results.append(payload)
+            trace.append(f"📊 {payload['tool']} -> {payload['status']}")
 
-        trace.append(f"📊 Stored result from {last_message.name}")
-    context = build_context(state)
+        except json.JSONDecodeError:
+
+            trace.append("⚠️ Failed to parse tool output.")
+
+            tool_results.append(
+                {
+                    "status": "error",
+                    "tool": last_message.name,
+                    "message": "Tool returned invalid JSON.",
+                }
+            )
+
+    # ---------------------------------------------------------
+    # Build context
+    # ---------------------------------------------------------
+
+    context = build_context(
+        {
+            **state,
+            "tool_results": tool_results,
+        }
+    )
 
     messages = [
         SystemMessage(content=context),
         *state["messages"],
     ]
 
+    # ---------------------------------------------------------
+    # Invoke LLM
+    # ---------------------------------------------------------
+
     response = safe_invoke(
         llm_with_tools,
         messages,
     )
 
+    # ---------------------------------------------------------
+    # Debug
+    # ---------------------------------------------------------
+
     print("\n===== TOOL CALLS =====")
 
     if response.tool_calls:
-        for tool in response.tool_calls:
-            print(f"Tool call: {tool['name']} ")
 
-    return {"messages": [response], "trace": trace, "tool_results": tool_results}
+        for tool in response.tool_calls:
+            print(f"Tool call -> {tool['name']}")
+
+    # ---------------------------------------------------------
+    # Return updated state
+    # ---------------------------------------------------------
+
+    return {
+        "messages": [response],
+        "trace": trace,
+        "tool_results": tool_results,
+    }
 
 
 def planner_node(state):
@@ -86,19 +132,34 @@ def planner_node(state):
     }
 
 
-def reflection_node(state):
+def reflection_node(state: AgentState):
 
-    last_message = state["messages"][-1]
+    print("➡️ Reflection")
 
-    if "ERROR:" in last_message.content:
+    tool_results = state.get("tool_results", [])
 
-        print("🔍 Reflection")
+    if not tool_results:
+        return {}
 
-        print(last_message.content)
+    latest = tool_results[-1]
+
+    # Success
+    if latest.get("status") == "success":
+        return {"last_error": None}
+
+    # Failure
+    retry_count = state.get("retry_count", 0)
+
+    retry_count += 1
+
+    if retry_count > MAX_RETRIES:
 
         return {
-            "last_error": last_message.content,
-            "retry_count": state.get("retry_count", 0) + 1,
+            "retry_count": retry_count,
+            "last_error": latest.get("message"),
         }
 
-    return {}
+    return {
+        "retry_count": retry_count,
+        "last_error": latest.get("message"),
+    }
