@@ -6,8 +6,24 @@ from langchain_core.messages import BaseMessage
 
 
 class AgentState(TypedDict):
-    messages: Annotated[list[BaseMessage], add_messages]
+    # Conversation
+    messages: Annotated[list, add_messages]
+
+    # Planner
+    plan: str
+
+    # Logger
     trace: list[str]
-    plan: list[str]
+
+    # Executor
+    current_task: str
+
+    completed_tasks: list[str]
+
+    # Tool outputs
+    tool_results: list[dict]
+
+    # Reflection
     last_error: str | None
+
     retry_count: int

@@ -1,7 +1,14 @@
 import sqlite3
 import random
 
-conn = sqlite3.connect("database/sales.db")
+from anyio import Path
+
+DB_PATH = Path(__file__).parent / "sales.db"
+
+print(f"Creating database at: {DB_PATH}")
+
+
+conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
 cursor.execute("""

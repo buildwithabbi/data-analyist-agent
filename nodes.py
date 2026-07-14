@@ -1,4 +1,6 @@
-from llm import llm
+from langsmith import trace
+
+from llm import llm, safe_invoke
 from tools import TOOLS
 from planner import create_plan
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -10,35 +12,29 @@ llm_with_tools = llm.bind_tools([*TOOLS])
 
 from groq import BadRequestError
 
-def chatbot(state):
-    print("➡️ Chatbot")
 
-    trace = state.get("trace", [])
+from state import AgentState
+
+def executor(state: AgentState) -> dict:
+
+    print("➡️ Executor")
+
+    trace = [
+        *state.get("trace", []),
+        "🧠 Context built",
+    ]
 
     context = build_context(state)
-    trace.append("🧠 Context built")
 
     messages = [
         SystemMessage(content=context),
         *state["messages"],
     ]
 
-    try:
-        response = llm_with_tools.invoke(messages)
-    except BadRequestError as e:
-        print(f"⚠️ Tool call generation failed: {e}")
-        trace.append(f"⚠️ Malformed tool call, retrying: {e}")
-
-        # Retry once — small models occasionally self-correct on a second pass
-        try:
-            response = llm_with_tools.invoke(messages)
-        except BadRequestError as e2:
-            print(f"❌ Retry also failed: {e2}")
-            trace.append(f"❌ Tool call failed after retry: {e2}")
-            # Fall back to a plain AIMessage so the graph doesn't crash
-            response = AIMessage(
-                content="Sorry, I had trouble formatting that request internally. Could you rephrase or simplify your question?"
-            )
+    response = safe_invoke(
+        llm_with_tools,
+        messages,
+    )
 
     return {
         "messages": [response],
@@ -51,12 +47,15 @@ def planner_node(state):
 
     plan = create_plan(question)
 
-    trace = state.get("trace", [])
+    trace = [
+    *state.get("trace", []),
+    "Context built",
+    ]
 
     trace.append("📋 Planner generated execution plan")
 
-    print("\n===== PLAN =====")
-    trace.append(f"📋 PLAN\n{plan}")
+    trace.append("➡️ Planner")
+    trace.append(f"📋 Plan:\n{plan}")
 
     return {
         "plan": plan,

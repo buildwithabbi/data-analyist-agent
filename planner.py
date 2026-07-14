@@ -17,7 +17,7 @@ from llm import llm
 
 
 def create_plan(question: str):
-    print("➡️ Planner")
+    
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         ("human", question),
