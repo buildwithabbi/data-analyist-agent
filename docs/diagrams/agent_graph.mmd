@@ -9,14 +9,19 @@ graph TD;
 	executor(executor)
 	tool(tool)
 	reflection(reflection)
+	memory(memory)
+	memory_update(memory_update)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> planner;
+	__start__ --> memory;
 	executor -. &nbsp;end&nbsp; .-> __end__;
 	executor -.-> tool;
+	memory --> planner;
 	planner --> executor;
 	reflection -. &nbsp;end&nbsp; .-> __end__;
 	reflection -.-> executor;
+	reflection -.-> memory_update;
 	tool --> reflection;
+	memory_update --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

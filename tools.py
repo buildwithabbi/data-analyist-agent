@@ -11,6 +11,7 @@ matplotlib.use(
 import matplotlib.pyplot as plt
 import os
 from typing import Literal
+from pydantic import BaseModel, ConfigDict
 import json
 import os
 import re
@@ -27,6 +28,15 @@ import traceback
 from langchain_core.tools import tool
 
 DB_PATH = Path(__file__).resolve().parent / "database" / "sales.db"
+
+
+class ChartDataPoint(BaseModel):
+    """A single, explicit chart point for reliable tool-call validation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    value: float
 
 
 def get_schema_text():
@@ -226,8 +236,8 @@ def get_schema() -> str:
 
 @tool
 def generate_chart(
-    data: str,
-    chart_type: Literal["bar", "line", "pie", "plt.scatter"],
+    data: list[ChartDataPoint],
+    chart_type: Literal["bar", "line", "pie", "scatter"],
     title: str,
 ) -> str:
     """
@@ -240,22 +250,18 @@ def generate_chart(
     IMPORTANT
     ---------
     - Always call `run_sql` FIRST.
-    - Pass the SQL output directly to this tool.
-    - Do NOT rename column names.
-    - Do NOT transform the JSON structure.
-    - This tool automatically detects:
-        * the first text column as the X-axis
-        * the first numeric column as the Y-axis
+    - Pass a compact list of points, each containing only `label` and `value`.
+    - Use `label` for the X-axis/category and `value` for the metric.
 
     Args:
         data:
-            JSON array returned by run_sql.
+            Array of chart points.
 
             Example:
             [
-                {"customer_name": "Alice", "sales": 1200},
-                {"customer_name": "Bob", "sales": 950},
-                {"customer_name": "Charlie", "sales": 780}
+                {"label": "Alice", "value": 1200},
+                {"label": "Bob", "value": 950},
+                {"label": "Charlie", "value": 780}
             ]
 
         chart_type:
@@ -291,7 +297,7 @@ def generate_chart(
     fig = None
 
     try:
-        rows = json.loads(data)
+        rows = [point.model_dump() for point in data]
 
         if not isinstance(rows, list):
             return pretty_json(
@@ -331,29 +337,8 @@ def generate_chart(
                 }
             )
 
-        text_columns = df.select_dtypes(include=["object"]).columns.tolist()
-        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
-
-        if not text_columns:
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "No categorical column found.",
-                }
-            )
-
-        if not numeric_columns:
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "No numeric column found.",
-                }
-            )
-
-        x_column = text_columns[0]
-        y_column = numeric_columns[0]
+        x_column = "label"
+        y_column = "value"
 
         df = df.dropna(subset=[x_column, y_column])
 
