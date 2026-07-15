@@ -1,5 +1,4 @@
 from datetime import datetime
-from console_output import print_json
 
 
 class AgentLogger:
@@ -12,4 +11,6 @@ class AgentLogger:
         self.logs.append(f"[{timestamp}] {message}")
 
     def print(self):
-        print_json("AGENT EXECUTION TRACE", self.logs)
+        print("\n===== AGENT EXECUTION TRACE =====")
+        for message in self.logs:
+            print(message)

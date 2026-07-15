@@ -1,20 +1,26 @@
-from typing import List
+from models import MemoryItem
 
 # In-memory storage for the current session
-_MEMORY: List[str] = []
+_MEMORY: list[MemoryItem] = []
 
 
-def add_memory(memory: str) -> None:
+def add_memory(memory: MemoryItem) -> None:
     """
     Add a new memory to the current session.
     """
-    memory = memory.strip()
+    content = memory.content.strip()
+    if content:
+        _MEMORY.append(
+            MemoryItem(
+                content=content,
+                importance=memory.importance,
+                category=memory.category,
+                timestamp=memory.timestamp,
+            )
+        )
 
-    if memory:
-        _MEMORY.append(memory)
 
-
-def get_memory() -> List[str]:
+def get_memory() -> list[MemoryItem]:
     """
     Return all memories for the current session.
     """
@@ -28,7 +34,7 @@ def clear_memory() -> None:
     _MEMORY.clear()
 
 
-def last_memory() -> str | None:
+def last_memory() -> MemoryItem | None:
     """
     Return the most recent memory.
     """
@@ -45,11 +51,13 @@ def memory_count() -> int:
     return len(_MEMORY)
 
 
-def add_unique_memory(memory: str) -> None:
+def add_unique_memory(memory: MemoryItem) -> None:
     """
     Add a memory only if it does not already exist.
     """
-    memory = memory.strip()
-
-    if memory and memory not in _MEMORY:
-        _MEMORY.append(memory)
+    content = memory.content.strip()
+    if content and not any(
+        item.category == memory.category and item.content == content
+        for item in _MEMORY
+    ):
+        add_memory(memory)

@@ -4,7 +4,18 @@ from console_output import pretty_json
 def build_context(state):
 
     question = state["messages"][0].content
-    plan = state.get("plan", "")
+    plan = state.get("plan")
+    if plan:
+        plan_text = "\n".join(
+            f"{index + 1}. {step}" for index, step in enumerate(plan.steps)
+        )
+        plan_text = (
+            f"Goal: {plan.goal}\n"
+            f"Current step: {plan.current_step}\n"
+            f"Steps:\n{plan_text}"
+        )
+    else:
+        plan_text = "No plan created yet."
 
     schema = get_schema_text()
 
@@ -31,7 +42,7 @@ Available Tools:
 
 Execution Plan:
 
-{plan}
+{plan_text}
 
 User Question:
 
@@ -69,7 +80,10 @@ Tool Usage Rules:
         sections.append("Session Memory:")
 
         for item in memory:
-            sections.append(f"- {item}")
+            sections.append(
+                f"- [{item.category}, importance={item.importance:.2f}] "
+                f"{item.content} ({item.timestamp})"
+            )
 
     # ---------------------------------------------------------
     # Previous Tool Results
