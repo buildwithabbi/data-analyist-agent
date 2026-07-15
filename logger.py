@@ -1,4 +1,5 @@
 from datetime import datetime
+from console_output import print_json
 
 
 class AgentLogger:
@@ -11,11 +12,4 @@ class AgentLogger:
         self.logs.append(f"[{timestamp}] {message}")
 
     def print(self):
-        print("\n" + "=" * 60)
-        print("🤖 AGENT EXECUTION TRACE")
-        print("=" * 60)
-
-        for log in self.logs:
-            print(log)
-
-        print("=" * 60)
+        print_json("AGENT EXECUTION TRACE", self.logs)

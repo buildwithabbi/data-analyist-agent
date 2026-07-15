@@ -1,14 +1,18 @@
 from langchain_core.messages import AIMessage
+from console_output import print_json
+
 
 def route_tools(state):
-    print("➡️ Router")
-
     last_message = state["messages"][-1]
 
-    print(type(last_message))
-
     if isinstance(last_message, AIMessage):
-        print("Tool calls:", last_message.tool_calls)
+        print_json(
+            "ROUTER",
+            {
+                "message_type": type(last_message).__name__,
+                "tool_calls": last_message.tool_calls,
+            },
+        )
 
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tool"

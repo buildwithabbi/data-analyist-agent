@@ -1,6 +1,5 @@
 from langchain_core.messages import SystemMessage
 
-
 SYSTEM_PROMPT = """
 You are an AI Planner.
 
@@ -17,7 +16,7 @@ from llm import llm
 
 
 def create_plan(question: str):
-    print("➡️ Planner")
+
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         ("human", question),

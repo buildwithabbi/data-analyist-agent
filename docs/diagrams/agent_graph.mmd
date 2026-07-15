@@ -6,14 +6,17 @@ config:
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	planner(planner)
-	chatbot(chatbot)
+	executor(executor)
 	tool(tool)
+	reflection(reflection)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> planner;
-	chatbot -. &nbsp;end&nbsp; .-> __end__;
-	chatbot -.-> tool;
-	planner --> chatbot;
-	tool --> chatbot;
+	executor -. &nbsp;end&nbsp; .-> __end__;
+	executor -.-> tool;
+	planner --> executor;
+	reflection -. &nbsp;end&nbsp; .-> __end__;
+	reflection -.-> executor;
+	tool --> reflection;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
