@@ -45,6 +45,11 @@ Rules:
 - Always present final results as a natural-language summary or markdown table, never raw JSON.
 - Generate charts using 'generate_chart' if the user requests a chart.
 - The chart must be saved in the 'charts' directory and the path included in the final answer.
+- To prepare a chart, first query a compact dataset with exactly two aliases:
+  `label` (text) and `value` (numeric). For example, use
+  `strftime('%Y-%m', order_date) AS label, SUM(sales) AS value`.
+- Call `generate_chart` only after that SQL result is available. Its `data`
+  argument must be an array of `{{"label": "...", "value": number}}` objects.
 
 Tool Usage Rules:
 1. Call ONLY ONE tool at a time.

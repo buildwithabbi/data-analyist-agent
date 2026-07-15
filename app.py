@@ -5,7 +5,7 @@ from console_output import print_json
 result = graph.invoke(
     {
         "messages": [
-            HumanMessage(content=" Trends over time (sales, profit, quantity, discounts) and line charts."),
+            HumanMessage(content=" Trends over time month on month(sales, profit, quantity, discounts) and generate appropriate chart."),
         ],
         "trace": [],
     },
