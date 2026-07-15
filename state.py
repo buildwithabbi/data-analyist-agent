@@ -4,6 +4,8 @@ from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 from models import ToolResult
+from models import MemoryItem
+from models import Plan
 
 
 class AgentState(TypedDict):
@@ -11,7 +13,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
     # Planner
-    plan: str
+    plan: Plan
 
     # Logger
     trace: list[str]
@@ -29,4 +31,4 @@ class AgentState(TypedDict):
 
     retry_count: int
 
-    memory: list[str]
+    memory: list[MemoryItem]

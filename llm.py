@@ -10,7 +10,7 @@ llm = ChatGroq(
     # 🌟 TOP-TIER REASONING & LARGE PRODUCTION MODELS
     
     # ==========================================
-    #"openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
+    "openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
     #"llama-3.3-70b-versatile",       # Best balanced open-weight production model (high capacity, multi-tool use)
     #"deepseek-r1-distill-llama-70b", # Exceptional specialized model for advanced logic, math, and coding tasks
     # # ==========================================
@@ -29,7 +29,7 @@ llm = ChatGroq(
     # # ==========================================
     # # 🏃 LIGHTWEIGHT, FAST & UTILITY MODELS
     # # ==========================================
-    "llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
+    #"llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
     # "openai/gpt-oss-safeguard-20b",  # Specialized model strictly tuned for content moderation and safety
     # # ==========================================
     # # 🎙️ AUDIO SPEECH-TO-TEXT MODELS

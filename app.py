@@ -1,11 +1,12 @@
 from langchain_core.messages import HumanMessage
 from graph import graph
 from console_output import print_json
+from logger import AgentLogger
 
 result = graph.invoke(
     {
         "messages": [
-            HumanMessage(content=" Trends over time month on month(sales, profit, quantity, discounts) and generate appropriate chart."),
+            HumanMessage(content=" Trends over time month on month(sales, profit, quantity, discounts) and generate line chart in one picture."),
         ],
         "trace": [],
     },
@@ -13,6 +14,11 @@ result = graph.invoke(
 )
 
 print_json("TOOL RESULTS", result.get("tool_results", []))
-print_json("AGENT TRACE", result.get("trace", []))
+
+logger = AgentLogger()
+for entry in result.get("trace", []):
+    logger.log(entry)
+logger.print()
+
 print("\n========== ANSWER ==========")
 print(result["messages"][-1].content)

@@ -25,7 +25,9 @@ from context_builder import build_context
 from llm import llm, safe_invoke
 from state import AgentState
 from models import ToolResult
+from models import MemoryItem
 from memory.short_term import get_memory
+from datetime import datetime, timezone
 tool_results: list[ToolResult]
 
 
@@ -153,7 +155,18 @@ def planner_node(state):
     trace.append("📋 Planner generated execution plan")
 
     trace.append("➡️ Planner")
-    trace.append(f"📋 Plan:\n{plan}")
+    trace.extend(
+        [
+            "📋 Plan:",
+            f"Goal: {plan.goal}",
+            f"Current step: {plan.current_step}",
+            "Steps:",
+            *[
+                f"  {index}. {step}"
+                for index, step in enumerate(plan.steps, start=1)
+            ],
+        ]
+    )
 
     return {
         "plan": plan,
@@ -232,7 +245,12 @@ def memory_update_node(state: AgentState):
         row_count = latest.result.get("row_count", 0)
 
         add_memory(
-            f"Executed SQL successfully and returned {row_count} rows."
+            MemoryItem(
+                content=f"Executed SQL successfully and returned {row_count} rows.",
+                importance=0.80,
+                category="tool",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
         )
 
     elif latest.tool == "generate_chart":
@@ -240,7 +258,12 @@ def memory_update_node(state: AgentState):
         title = latest.result.get("title", "Chart")
 
         add_memory(
-            f"Generated chart '{title}'."
+            MemoryItem(
+                content=f"Generated chart '{title}'.",
+                importance=0.92,
+                category="tool",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
         )
 
     return {}
