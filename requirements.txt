@@ -34,6 +34,7 @@ pandas==3.0.3
 pillow==12.3.0
 pydantic==2.13.4
 pydantic_core==2.46.4
+pytest-cov==7.1.0
 pygraphviz==2.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0

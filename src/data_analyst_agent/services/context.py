@@ -13,11 +13,15 @@ def build_context(state):
         ),
         "",
     )
+
     plan = state.get("plan")
+
     if plan:
         plan_text = "\n".join(
-            f"{index + 1}. {step}" for index, step in enumerate(plan.steps)
+            f"{index + 1}. {step}"
+            for index, step in enumerate(plan.steps)
         )
+
         plan_text = (
             f"Goal: {plan.goal}\n"
             f"Current step: {plan.current_step}\n"
@@ -29,7 +33,9 @@ def build_context(state):
     schema = get_schema_text()
 
     tool_names = "\n".join(
-        f"- {tool.name}" for tool in TOOLS if tool.name != "get_schema"
+        f"- {tool.name}"
+        for tool in TOOLS
+        if tool.name != "get_schema"
     )
 
     sections = []
@@ -38,7 +44,8 @@ def build_context(state):
     # System Prompt
     # ---------------------------------------------------------
 
-    sections.append(f"""
+    sections.append(
+        f"""
 You are an expert SQLite Data Analyst.
 
 Database Schema:
@@ -69,14 +76,44 @@ Rules:
   `label` (text) and `value` (numeric). For example, use
   `strftime('%Y-%m', order_date) AS label, SUM(sales) AS value`.
 - Call `generate_chart` only after that SQL result is available. Its `data`
-  argument must be an array of `{{"label": "...", "value": number}}` objects.
+  argument must be an array of {{"label": "...", "value": number}} objects.
 
 Tool Usage Rules:
 1. Call ONLY ONE tool at a time.
 2. Wait for the tool result before deciding the next tool.
 3. Never call multiple dependent tools in one response.
 4. Think → Tool → Observe → Think Again.
-""")
+"""
+    )
+
+    # ---------------------------------------------------------
+    # Repair Context
+    # ---------------------------------------------------------
+
+    repair_attempts = state.get("repair_attempts", 0)
+
+    if repair_attempts:
+
+        sections.append(
+            f"""
+Repair Attempt: {repair_attempts}
+
+Previous Failure:
+
+{state.get("last_failure_reason", "Unknown")}
+
+Repair Guidance:
+
+{state.get("repair_context", "")}
+
+Repair Rules:
+- Do NOT repeat the previous failed tool call unchanged.
+- Analyze the previous failure before acting.
+- Correct the root cause.
+- Reuse successful previous tool results whenever possible.
+- Continue the existing execution plan instead of restarting.
+"""
+        )
 
     # ---------------------------------------------------------
     # Session Memory
@@ -95,7 +132,7 @@ Tool Usage Rules:
             )
 
     # ---------------------------------------------------------
-    # Previous Tool Results
+    # Execution History
     # ---------------------------------------------------------
 
     tool_results = state.get("tool_results", [])
@@ -113,12 +150,14 @@ Status : {tool.status}
 
             if tool.result:
                 section += f"""
+
 Result:
 {pretty_json(tool.result)}
 """
 
             if tool.message:
                 section += f"""
+
 Error:
 {tool.message}
 """

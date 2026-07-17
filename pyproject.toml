@@ -24,4 +24,4 @@ data-analyst-agent = "data_analyst_agent.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
+pythonpath = ["src"]

@@ -15,7 +15,7 @@ def main() -> None:
                 HumanMessage(
                     content=(
                         "Trends over time month on month (sales, profit, quantity, "
-                        "discounts) and generate a line chart in one picture."
+                        "discounts) and generate suiatable chart ."
                     )
                 )
             ],

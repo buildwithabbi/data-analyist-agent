@@ -1,20 +1,24 @@
-"""Reflection workflow node."""
+"""
+Reflection workflow node.
+"""
 
-from ..state import AgentState
+from data_analyst_agent.agent.state import AgentState
+from data_analyst_agent.services.repair import analyze_execution
 
 
 def reflection_node(state: AgentState) -> dict:
+    """
+    Analyze the latest execution and produce a
+    structured RepairDecision.
+
+    Reflection does not repair anything.
+    It only classifies execution.
+    """
+
     print("➡️ Reflection")
-    tool_results = state.get("tool_results", [])
 
-    if not tool_results:
-        return {}
-
-    latest = tool_results[-1]
-    if latest.status == "success":
-        return {"last_error": None}
+    repair_decision = analyze_execution(state)
 
     return {
-        "retry_count": state.get("retry_count", 0) + 1,
-        "last_error": latest.message,
+        "repair_decision": repair_decision
     }

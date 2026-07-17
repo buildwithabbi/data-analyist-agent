@@ -6,6 +6,7 @@ from .nodes import (
     planner_node,
     executor,
     reflection_node,
+    repair_node,
     memory_node,
     memory_update_node,
 )
@@ -13,6 +14,7 @@ from .nodes import (
 from ..tools import TOOLS
 from .tool_routing import route_tools
 from .reflection_routing import route_reflection
+
 
 builder = StateGraph(AgentState)
 
@@ -31,9 +33,12 @@ builder.add_node("tool", ToolNode(TOOLS))
 
 builder.add_node("reflection", reflection_node)
 
+builder.add_node("repair", repair_node)
+
 builder.add_node("memory", memory_node)
 
 builder.add_node("memory_update", memory_update_node)
+
 builder.add_edge(
     "planner",
     "executor",
@@ -69,12 +74,26 @@ builder.add_conditional_edges(
     "reflection",
     route_reflection,
     {
-        "executor": "executor",
+        "repair": "repair",
         "memory_update": "memory_update",
         "end": END,
     },
 )
 
-builder.add_edge("memory_update", END)
+# -----------------------------
+# Repair
+# -----------------------------
 
-graph = builder.compile(name="DataAnalystAgent")
+builder.add_edge(
+    "repair",
+    "executor",
+)
+
+builder.add_edge(
+    "memory_update",
+    END,
+)
+
+graph = builder.compile(
+    name="DataAnalystAgent",
+)

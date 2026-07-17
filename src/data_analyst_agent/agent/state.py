@@ -1,32 +1,46 @@
 from typing import Annotated
 from typing_extensions import TypedDict
-
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
-from ..domain.models import MemoryItem, Plan, ToolResult
+from ..domain.models import MemoryItem, Plan, ToolResult, RepairDecision
+from typing import Annotated
+from typing_extensions import NotRequired, TypedDict
+from langgraph.graph.message import add_messages
+
 
 
 class AgentState(TypedDict):
+    """
+    Shared state passed between all LangGraph nodes.
+    """
+
     # Conversation
     messages: Annotated[list, add_messages]
 
     # Planner
-    plan: Plan
+    plan: NotRequired[Plan]
 
-    # Logger
-    trace: list[str]
+    # Memory
+    memory: NotRequired[list[MemoryItem]]
 
-    # Executor
-    current_task: str
+    # Tool execution
+    tool_results: NotRequired[list[ToolResult]]
 
-    completed_tasks: list[str]
+    # Execution trace
+    trace: NotRequired[list[str]]
 
-    # Tool outputs
-    tool_results: list[ToolResult]
+    # -----------------------------
+    # Repair Loop State
+    # -----------------------------
 
-    # Reflection
-    last_error: str | None
+    repair_decision: NotRequired[RepairDecision]
 
-    retry_count: int
+    repair_attempts: NotRequired[int]
 
-    memory: list[MemoryItem]
+    repair_history: NotRequired[list[str]]
+
+    last_failed_tool: NotRequired[str]
+
+    last_failure_reason: NotRequired[str]
+
+    repair_context: NotRequired[str]

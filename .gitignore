@@ -1,13 +1,15 @@
 __pycache__/
 .pytest_cache/
+.coverage
+*.py,cover
 .cache/
 .venv/
 .env
 agent.py
 practice.py
 charts
-
-
+task-notes.md
+htmlcov/
 
 
 
