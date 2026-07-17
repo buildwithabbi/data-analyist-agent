@@ -22,8 +22,8 @@ needs a chart, use concise steps such as "Run SQL", "Generate Chart", and
 steps.
 """
 
-from llm import llm
-from models import Plan
+from ..core.llm import llm
+from ..domain.models import Plan
 
 
 def _plan_from_response(goal: str, response_text: str) -> Plan:

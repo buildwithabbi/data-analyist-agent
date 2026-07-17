@@ -1,4 +1,7 @@
 __pycache__/
+.pytest_cache/
+.cache/
+.venv/
 .env
 agent.py
 practice.py

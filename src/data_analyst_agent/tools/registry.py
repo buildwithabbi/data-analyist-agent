@@ -1,4 +1,4 @@
-from tools import TOOLS
+from .analytics import TOOLS
 
 
 class ToolRegistry:

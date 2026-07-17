@@ -7,7 +7,7 @@ Outputs:
 """
 
 from pathlib import Path
-from graph import graph
+from data_analyst_agent.agent.graph import graph
 
 OUTPUT_DIR = Path("docs/diagrams")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

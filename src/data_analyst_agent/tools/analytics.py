@@ -1,33 +1,27 @@
-from langchain_core.tools import tool
-from console_output import pretty_json, print_json
-import sqlite3
-import json
-import pandas as pd
-import matplotlib
-
-matplotlib.use(
-    "Agg"
-)  # MUST be before pyplot import, and before any other matplotlib import
-import matplotlib.pyplot as plt
-import os
-from typing import Literal
-from pydantic import BaseModel, ConfigDict
-import json
 import os
 import re
+import sqlite3
 import traceback
+from pathlib import Path
+from typing import Literal
+
 import pandas as pd
 from langchain_core.tools import tool
-import sqlite3
-from pathlib import Path
-from langchain_core.tools import tool
-from pathlib import Path
-import json
-import sqlite3
-import traceback
-from langchain_core.tools import tool
+from pydantic import BaseModel, ConfigDict
 
-DB_PATH = Path(__file__).resolve().parent / "database" / "sales.db"
+from ..utils.console import pretty_json, print_json
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DB_PATH = PROJECT_ROOT / "database" / "sales.db"
+
+matplotlib_cache = PROJECT_ROOT / ".cache" / "matplotlib"
+matplotlib_cache.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_cache))
+
+import matplotlib
+
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt
 
 
 class ChartDataPoint(BaseModel):
@@ -393,11 +387,12 @@ def generate_chart(
 
         ax.set_title(title)
 
-        os.makedirs("charts", exist_ok=True)
+        charts_dir = PROJECT_ROOT / "charts"
+        charts_dir.mkdir(exist_ok=True)
 
         safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
 
-        chart_path = os.path.join("charts", f"{safe_title}.png")
+        chart_path = charts_dir / f"{safe_title}.png"
 
         fig.savefig(chart_path, dpi=300, bbox_inches="tight")
 
@@ -405,7 +400,7 @@ def generate_chart(
             {
                 "status": "success",
                 "tool": "generate_chart",
-                "chart_path": chart_path,
+                "chart_path": str(chart_path.relative_to(PROJECT_ROOT)),
                 "chart_type": chart_type,
                 "title": title,
             }

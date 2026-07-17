@@ -1,5 +1,5 @@
-from tools import TOOLS, get_schema_text
-from console_output import pretty_json
+from ..tools import TOOLS, get_schema_text
+from ..utils.console import pretty_json
 
 def build_context(state):
 

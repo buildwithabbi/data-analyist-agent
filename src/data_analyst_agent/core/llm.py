@@ -1,8 +1,8 @@
 from langchain_groq import ChatGroq
 from groq import BadRequestError
-from tools import TOOLS
-from config import GROQ_API_KEY
-from console_output import print_json
+from ..tools import TOOLS
+from .config import GROQ_API_KEY
+from ..utils.console import print_json
 
 llm = ChatGroq(
     model=

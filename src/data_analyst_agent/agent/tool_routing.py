@@ -1,5 +1,5 @@
 from langchain_core.messages import AIMessage
-from console_output import print_json
+from ..utils.console import print_json
 
 
 def route_tools(state):

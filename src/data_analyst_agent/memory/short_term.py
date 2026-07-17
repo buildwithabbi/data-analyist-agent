@@ -1,4 +1,4 @@
-from models import MemoryItem
+from ..domain.models import MemoryItem
 
 # In-memory storage for the current session
 _MEMORY: list[MemoryItem] = []
