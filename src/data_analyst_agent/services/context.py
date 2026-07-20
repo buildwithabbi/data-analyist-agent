@@ -46,43 +46,22 @@ def build_context(state):
 
     sections.append(
         f"""
-You are an expert SQLite Data Analyst.
+You are a SQLite data analyst. Use only table `sales` and the schema below;
+write SQLite SELECT queries only. Give final answers as prose or a Markdown
+table, never raw JSON.
 
-Database Schema:
+SQLite date rule: never use `EXTRACT`. Use `strftime('%Y', order_date)`,
+`strftime('%m', order_date)`, or `strftime('%Y-%m', order_date)`.
 
-{schema}
+Schema: {schema}
+Tools: {tool_names}
+Plan: {plan_text}
+Question: {question}
 
-Available Tools:
-
-{tool_names}
-
-Execution Plan:
-
-{plan_text}
-
-User Question:
-
-{question}
-
-Rules:
-- Only use the table 'sales'
-- Never invent table names
-- Never invent columns
-- Only generate SQLite SQL.
-- Always present final results as a natural-language summary or markdown table, never raw JSON.
-- Generate charts using 'generate_chart' if the user requests a chart.
-- The chart must be saved in the 'charts' directory and the path included in the final answer.
-- To prepare a chart, first query a compact dataset with exactly two aliases:
-  `label` (text) and `value` (numeric). For example, use
-  `strftime('%Y-%m', order_date) AS label, SUM(sales) AS value`.
-- Call `generate_chart` only after that SQL result is available. Its `data`
-  argument must be an array of {{"label": "...", "value": number}} objects.
-
-Tool Usage Rules:
-1. Call ONLY ONE tool at a time.
-2. Wait for the tool result before deciding the next tool.
-3. Never call multiple dependent tools in one response.
-4. Think → Tool → Observe → Think Again.
+For a requested chart: query `label` (text) and `value` (number), then call
+`generate_chart` using exactly the returned values; include its path in the
+answer. Complete one measure at a time and never invent chart data.
+Call exactly one tool, wait for its result, then follow the current plan step.
 """
     )
 
@@ -165,3 +144,82 @@ Error:
             sections.append(section)
 
     return "\n\n".join(sections)
+
+
+
+
+def build_repair_context(state) -> str:
+    """
+    Build a dedicated context for repairing a failed execution plan.
+    """
+
+    plan = state.get("plan")
+
+    if plan:
+        plan_text = "\n".join(
+            f"{idx + 1}. {step}"
+            for idx, step in enumerate(plan.steps)
+        )
+    else:
+        plan_text = "No execution plan available."
+
+    tool_results = state.get("tool_results", [])
+
+    latest_result = tool_results[-1] if tool_results else None
+
+    latest_error = latest_result.message if latest_result else "Unknown"
+
+    latest_tool = latest_result.tool if latest_result else "Unknown"
+
+    schema = get_schema_text()
+
+    tool_names = "\n".join(
+        f"- {tool.name}"
+        for tool in TOOLS
+        if tool.name != "get_schema"
+    )
+
+    return f"""
+You are repairing an execution plan.
+
+Do NOT create a completely new strategy.
+
+Only modify the part of the plan that caused the failure.
+
+Original Plan
+
+Goal:
+{plan.goal if plan else "Unknown"}
+
+Steps
+
+{plan_text}
+
+Failed Tool
+
+{latest_tool}
+
+Failure
+
+{latest_error}
+
+Retry Attempt
+
+{state.get("repair_attempts",0)}
+
+Available Tools
+
+{tool_names}
+
+Database Schema
+
+{schema}
+
+Instructions
+
+1. Preserve successful work.
+2. Do not restart the workflow.
+3. Fix only the failed step.
+4. Prefer minimal changes.
+5. Return a corrected execution plan.
+"""

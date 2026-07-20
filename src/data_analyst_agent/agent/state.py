@@ -1,12 +1,16 @@
 from typing import Annotated
-from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage
-from ..domain.models import MemoryItem, Plan, ToolResult, RepairDecision
-from typing import Annotated
-from typing_extensions import NotRequired, TypedDict
-from langgraph.graph.message import add_messages
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+from typing_extensions import NotRequired, TypedDict
+
+from ..domain.models import (
+    MemoryItem,
+    Plan,
+    RepairDecision,
+    RepairRecord,
+    ToolResult,
+)
 
 
 class AgentState(TypedDict):
@@ -14,30 +18,45 @@ class AgentState(TypedDict):
     Shared state passed between all LangGraph nodes.
     """
 
+    # ------------------------------------------------------------------
     # Conversation
-    messages: Annotated[list, add_messages]
+    # ------------------------------------------------------------------
 
-    # Planner
+    messages: Annotated[list[BaseMessage], add_messages]
+
+    # ------------------------------------------------------------------
+    # Planning
+    # ------------------------------------------------------------------
+
     plan: NotRequired[Plan]
 
+    # ------------------------------------------------------------------
     # Memory
+    # ------------------------------------------------------------------
+
     memory: NotRequired[list[MemoryItem]]
 
-    # Tool execution
+    # ------------------------------------------------------------------
+    # Tool Execution
+    # ------------------------------------------------------------------
+
     tool_results: NotRequired[list[ToolResult]]
 
-    # Execution trace
+    # ------------------------------------------------------------------
+    # Execution Trace
+    # ------------------------------------------------------------------
+
     trace: NotRequired[list[str]]
 
-    # -----------------------------
-    # Repair Loop State
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # Repair Loop
+    # ------------------------------------------------------------------
 
     repair_decision: NotRequired[RepairDecision]
 
     repair_attempts: NotRequired[int]
 
-    repair_history: NotRequired[list[str]]
+    repair_history: NotRequired[list[RepairRecord]]
 
     last_failed_tool: NotRequired[str]
 

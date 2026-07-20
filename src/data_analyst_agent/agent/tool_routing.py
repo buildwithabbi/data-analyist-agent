@@ -17,4 +17,6 @@ def route_tools(state):
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tool"
 
-    return "end"
+    # The model has produced its final natural-language answer.  Persist any
+    # successful work from the run before ending the graph.
+    return "final"

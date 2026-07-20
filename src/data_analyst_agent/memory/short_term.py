@@ -1,63 +1,115 @@
+from __future__ import annotations
+
 from ..domain.models import MemoryItem
 
-# In-memory storage for the current session
-_MEMORY: list[MemoryItem] = []
 
+class ShortTermMemory:
+    """
+    In-memory storage for the current agent session.
 
-def add_memory(memory: MemoryItem) -> None:
+    This class encapsulates all Short-Term Memory (STM) operations.
+    It intentionally has no knowledge of Long-Term Memory,
+    retrieval strategies, or persistence.
     """
-    Add a new memory to the current session.
-    """
-    content = memory.content.strip()
-    if content:
-        _MEMORY.append(
-            MemoryItem(
-                content=content,
-                importance=memory.importance,
-                category=memory.category,
-                timestamp=memory.timestamp,
-            )
+
+    def __init__(self) -> None:
+        self._memory: list[MemoryItem] = []
+
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
+    def add(self, memory: MemoryItem) -> None:
+        """
+        Store a memory.
+        """
+
+        if not memory.content.strip():
+            return
+
+        # Preserve the original MemoryItem (including its id).
+        self._memory.append(memory.model_copy(deep=True))
+
+    def add_unique(self, memory: MemoryItem) -> None:
+        """
+        Store a memory only if an equivalent memory
+        does not already exist.
+        """
+
+        if not memory.content.strip():
+            return
+
+        exists = any(
+            item.category == memory.category
+            and item.content == memory.content
+            for item in self._memory
         )
 
+        if not exists:
+            self.add(memory)
 
-def get_memory() -> list[MemoryItem]:
-    """
-    Return all memories for the current session.
-    """
-    return list(_MEMORY)
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
 
+    def get_all(self) -> list[MemoryItem]:
+        """
+        Return all session memories.
+        """
 
-def clear_memory() -> None:
-    """
-    Remove all memories from the current session.
-    """
-    _MEMORY.clear()
+        return self._memory.copy()
 
+    def get_last(self) -> MemoryItem | None:
+        """
+        Return the most recently stored memory.
+        """
 
-def last_memory() -> MemoryItem | None:
-    """
-    Return the most recent memory.
-    """
-    if not _MEMORY:
-        return None
+        return self._memory[-1] if self._memory else None
 
-    return _MEMORY[-1]
+    def count(self) -> int:
+        """
+        Return the number of stored memories.
+        """
 
+        return len(self._memory)
 
-def memory_count() -> int:
-    """
-    Return the number of stored memories.
-    """
-    return len(_MEMORY)
+    # ------------------------------------------------------------------
+    # Update
+    # ------------------------------------------------------------------
 
+    def update(self, memory: MemoryItem) -> None:
+        """
+        Update an existing memory.
 
-def add_unique_memory(memory: MemoryItem) -> None:
-    """
-    Add a memory only if it does not already exist.
-    """
-    content = memory.content.strip()
-    if content and not any(
-        item.category == memory.category and item.content == content
-        for item in _MEMORY
-    ):
-        add_memory(memory)
+        If the memory does not exist,
+        it is added to the session.
+        """
+
+        for index, existing in enumerate(self._memory):
+            if existing.id == memory.id:
+                self._memory[index] = memory.model_copy(deep=True)
+                return
+
+        self.add(memory)
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    def remove(self, memory_id: str) -> None:
+        """
+        Remove a memory by its identifier.
+        """
+
+        self._memory = [
+            memory
+            for memory in self._memory
+            if memory.id != memory_id
+        ]
+
+    def clear(self) -> None:
+        """
+        Remove all session memories.
+        """
+
+        self._memory.clear()

@@ -13,7 +13,9 @@ def route_reflection(state):
         return "end"
 
     if decision.status == ExecutionStatus.SUCCESS:
-        return "memory_update"
+        # Success means the latest tool invocation completed.  It does not
+        # mean the user's multi-step request is complete.
+        return "continue"
 
     if decision.status == ExecutionStatus.RECOVERABLE_FAILURE:
         return "repair"

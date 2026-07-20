@@ -11,7 +11,7 @@ def test_route_success():
         )
     }
 
-    assert route_reflection(state) == "memory_update"
+    assert route_reflection(state) == "continue"
 
 
 def test_route_repair():

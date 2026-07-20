@@ -1,7 +1,11 @@
+import datetime
+from typing import Optional
+from uuid import uuid4
 from pydantic.dataclasses import dataclass
 from pydantic import BaseModel, Field
 from enum import Enum
-from .enums import ErrorCategory, ExecutionStatus
+
+from .enums import ExecutionStatus, ErrorCategory
 
 @dataclass
 class ToolResult:
@@ -26,32 +30,23 @@ class MemoryItem:
     timestamp: str
 
 
-
-
 class RepairDecision(BaseModel):
     """
-    Structured output produced by the Reflection node.
+    Represents the outcome of execution analysis performed by the
+    Reflection/RepairService.
 
-    Reflection is responsible for deciding whether the
-    execution should continue, terminate, or enter the
-    Repair Loop.
-
-    This model serves as the contract between Reflection
-    and the Repair node.
+    This model acts as the contract between Reflection and the LangGraph
+    routing logic.
     """
 
     status: ExecutionStatus = Field(
+        ...,
         description="Overall execution status."
-    )
-
-    error_category: ErrorCategory = Field(
-        default=ErrorCategory.UNKNOWN,
-        description="Classification of the detected failure."
     )
 
     requires_repair: bool = Field(
         default=False,
-        description="Whether execution should be routed to the Repair node."
+        description="Whether the execution should be repaired."
     )
 
     retry_allowed: bool = Field(
@@ -59,12 +54,72 @@ class RepairDecision(BaseModel):
         description="Whether another repair attempt is permitted."
     )
 
-    failure_reason: str = Field(
-        default="",
+    error_category: ErrorCategory = Field(
+        default=ErrorCategory.UNKNOWN,
+        description="Normalized category of the execution failure."
+    )
+
+    failure_reason: Optional[str] = Field(
+        default=None,
         description="Human-readable explanation of the failure."
     )
 
-    repair_instruction: str = Field(
-        default="",
-        description="Guidance for the Repair node to generate a corrected execution."
+    failed_tool: Optional[str] = Field(
+        default=None,
+        description="Name of the tool that failed."
     )
+
+    retry_count: int = Field(
+        default=0,
+        ge=0,
+        description="Current repair attempt count."
+    )
+
+    repair_instruction: str | None = Field(
+        default=None,
+        description="Guidance supplied to the repair workflow.",
+    )
+
+    class Config:
+        frozen = True
+
+
+class RepairRecord(BaseModel):
+
+    attempt: int
+
+    failure_reason: str
+
+    previous_plan: Plan
+
+    repaired_plan: Plan
+
+    timestamp: datetime.datetime
+
+
+class ExecutionRecord(BaseModel):
+
+    step_number: int
+
+    tool_name: str
+
+    tool_input: dict
+
+    tool_output: str
+
+    success: bool
+
+    started_at: datetime.datetime
+
+    completed_at: datetime.datetime
+
+
+
+
+
+class MemoryItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    content: str
+    category: str
+    importance: float
+    timestamp: datetime.datetime

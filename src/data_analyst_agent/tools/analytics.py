@@ -129,6 +129,23 @@ def run_sql(query: str) -> str:
 
     query_upper = query.upper()
 
+    # This is a common PostgreSQL/MySQL habit. Catch it before SQLite returns
+    # the unhelpful "near FROM" syntax error so the repair loop gets an
+    # actionable, dialect-specific correction.
+    if re.search(r"\bEXTRACT\s*\(", query, flags=re.IGNORECASE):
+        return pretty_json(
+            {
+                "status": "error",
+                "tool": "run_sql",
+                "query": query,
+                "message": (
+                    "SQLite does not support EXTRACT(...). For dates use "
+                    "strftime('%Y', order_date), strftime('%m', order_date), "
+                    "or strftime('%Y-%m', order_date)."
+                ),
+            }
+        )
+
     # Only allow read-only queries
     if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
         return pretty_json(

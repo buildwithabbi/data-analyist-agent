@@ -53,7 +53,7 @@ builder.add_conditional_edges(
     route_tools,
     {
         "tool": "tool",
-        "end": END,
+        "final": "memory_update",
     },
 )
 
@@ -75,7 +75,10 @@ builder.add_conditional_edges(
     route_reflection,
     {
         "repair": "repair",
-        "memory_update": "memory_update",
+        # A successful tool call is an observation, not completion.  Return to
+        # the executor so the model can use its result to make the next tool
+        # call or provide the final answer.
+        "continue": "executor",
         "end": END,
     },
 )
