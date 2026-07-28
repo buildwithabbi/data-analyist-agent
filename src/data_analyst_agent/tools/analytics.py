@@ -15,6 +15,7 @@ from ..utils.console import pretty_json, print_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DB_PATH = PROJECT_ROOT / "database" / "sales.db"
+ACTIVE_DB_PATH = DB_PATH
 
 matplotlib_cache = PROJECT_ROOT / ".cache" / "matplotlib"
 matplotlib_cache.mkdir(parents=True, exist_ok=True)
@@ -69,8 +70,15 @@ def _evaluate_expression(expression: str) -> int | float:
     return visit(ast.parse(expression, mode="eval").body)
 
 
+def set_database_path(path: str | Path | None = None) -> Path:
+    """Select the SQLite dataset used by the analytical tools."""
+    global ACTIVE_DB_PATH
+    ACTIVE_DB_PATH = Path(path) if path else DB_PATH
+    return ACTIVE_DB_PATH
+
+
 def get_schema_text():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(ACTIVE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(sales)")
     cols = cursor.fetchall()
@@ -221,7 +229,7 @@ def run_sql(query: str) -> str:
 
     try:
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(ACTIVE_DB_PATH)
         conn.row_factory = sqlite3.Row
 
         cursor = conn.cursor()
@@ -277,7 +285,7 @@ def get_schema() -> str:
     """
     Return the database schema.
     """
-    print_json("GET SCHEMA", {"database": str(DB_PATH)})
+    print_json("GET SCHEMA", {"database": str(ACTIVE_DB_PATH)})
     return get_schema_text()
 
 

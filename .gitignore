@@ -13,5 +13,6 @@ htmlcov/
 memory/*.db
 knowledge/*.db
 agent_memory.db
+database/uploads/
 
 agentic-ai-python.zip
