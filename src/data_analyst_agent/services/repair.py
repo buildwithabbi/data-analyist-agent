@@ -18,6 +18,15 @@ from data_analyst_agent.domain.models import Plan, RepairDecision
 from constants import MAX_REPAIR_ATTEMPTS
 
 
+class RepairService:
+    """Compatibility service for the class-based repair node introduced remotely."""
+
+    async def repair_plan(self, state: AgentState) -> Plan | None:
+        # The deterministic repair loop retains the current plan and gives the
+        # executor the failure context needed to correct its next call.
+        return state.get("plan")
+
+
 def analyze_execution(state: AgentState) -> RepairDecision:
     """
     Analyze the latest execution and determine

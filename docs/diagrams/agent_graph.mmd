@@ -9,6 +9,7 @@ graph TD;
 	executor(executor)
 	tool(tool)
 	reflection(reflection)
+	repair(repair)
 	memory(memory)
 	memory_update(memory_update)
 	__end__([<p>__end__</p>]):::last
@@ -18,8 +19,9 @@ graph TD;
 	memory --> planner;
 	planner --> executor;
 	reflection -. &nbsp;end&nbsp; .-> __end__;
-	reflection -.-> executor;
 	reflection -.-> memory_update;
+	reflection -.-> repair;
+	repair --> executor;
 	tool --> reflection;
 	memory_update --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2

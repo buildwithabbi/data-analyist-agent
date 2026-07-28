@@ -12,5 +12,6 @@ task-notes.md
 htmlcov/
 memory/*.db
 knowledge/*.db
+agent_memory.db
 
 agentic-ai-python.zip

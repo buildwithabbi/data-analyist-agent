@@ -13,8 +13,12 @@ class Orchestrator:
         for agent in (ResearchAgent(), PlannerAgent(), AnalysisAgent(), ReviewerAgent(), ResponseAgent()): self.registry.register(agent.name, agent)
     def run(self, query, *, approved=True):
         context = SharedContext(query=query, approved=approved)
+        # Do not start external retrieval or planning work until a required
+        # human approval has been granted. This keeps sensitive workflows from
+        # producing side effects before the checkpoint.
+        if self.approval_required and not approved:
+            return {"status": "awaiting_approval", "context": context}
         for name in ("research", "planner", "analysis", "reviewer", "response"):
-            if self.approval_required and name == "analysis" and not approved: return {"status": "awaiting_approval", "context": context}
             self.bus.publish(AgentMessage(event="AgentStarted", sender=name, payload={}, task_id=name))
             context.data.update(self.registry.get(name).run(context)); context.traces.append(name)
             self.bus.publish(AgentMessage(event="AgentFinished", sender=name, payload=context.data, task_id=name))

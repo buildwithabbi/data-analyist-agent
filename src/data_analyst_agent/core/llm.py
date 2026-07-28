@@ -5,13 +5,16 @@ from ..tools import TOOLS
 from .config import GROQ_API_KEY
 from ..utils.console import print_json
 
+MODEL_NAME = "openai/gpt-oss-120b"
+MAX_TOKENS = 256 if MODEL_NAME == "llama-3.1-8b-instant" else 1024
+
 llm = ChatGroq(
-    model=
+    model=MODEL_NAME,
     # ==========================================
     # 🌟 TOP-TIER REASONING & LARGE PRODUCTION MODELS
     
     # ==========================================
-    "openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
+    # "openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
     #"llama-3.3-70b-versatile",       # Best balanced open-weight production model (high capacity, multi-tool use)
     #"deepseek-r1-distill-llama-70b", # Exceptional specialized model for advanced logic, math, and coding tasks
     # # ==========================================
@@ -39,7 +42,7 @@ llm = ChatGroq(
     # "whisper-large-v3-turbo"         # Maximum speed optimized audio transcription,
     api_key=GROQ_API_KEY,
     temperature=0,
-    # max_tokens=2048,
+    max_tokens=MAX_TOKENS,
 )
 
 
