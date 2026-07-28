@@ -1,5 +1,7 @@
 """Command-line entry point for a one-off analysis request."""
 
+import argparse
+
 from langchain_core.messages import HumanMessage
 
 from .agent.graph import graph
@@ -8,15 +10,19 @@ from .utils.logging import AgentLogger
 
 
 def main() -> None:
-    """Run the example analysis query and print its answer and trace."""
+    """Run an analysis query and print its answer and trace."""
+    parser = argparse.ArgumentParser(description="Run a data-analysis request.")
+    parser.add_argument("query", nargs="*", help="Natural-language analysis request.")
+    arguments = parser.parse_args()
+    query = " ".join(arguments.query) or (
+        "Trends over time month on month (sales, profit, quantity, discounts) "
+        "and generate a suitable chart."
+    )
     result = graph.invoke(
         {
             "messages": [
                 HumanMessage(
-                    content=(
-                        "Trends over time month on month (sales, profit, quantity, "
-                        "discounts) and generate suiatable chart ."
-                    )
+                    content=query
                 )
             ],
             "trace": [],

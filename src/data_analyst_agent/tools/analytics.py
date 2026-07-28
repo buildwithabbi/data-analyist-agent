@@ -1,4 +1,6 @@
 import os
+import ast
+import operator
 import re
 import sqlite3
 import traceback
@@ -40,6 +42,33 @@ class ChartSeries(BaseModel):
     data: list[ChartDataPoint]
 
 
+_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def _evaluate_expression(expression: str) -> int | float:
+    """Evaluate arithmetic only; names, calls, attributes, and indexing are rejected."""
+    def visit(node: ast.AST) -> int | float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPERATORS:
+            return _OPERATORS[type(node.op)](visit(node.left), visit(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPERATORS:
+            return _OPERATORS[type(node.op)](visit(node.operand))
+        raise ValueError("Only numeric arithmetic expressions are allowed.")
+
+    return visit(ast.parse(expression, mode="eval").body)
+
+
 def get_schema_text():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -57,9 +86,9 @@ def calculator(expression: str) -> str:
     25 * 12 + 10
     """
     try:
-        return str(eval(expression))
-    except Exception as e:
-        return str(e)
+        return str(_evaluate_expression(expression))
+    except (SyntaxError, TypeError, ValueError, ZeroDivisionError) as error:
+        return f"Invalid expression: {error}"
 
 
 @tool
