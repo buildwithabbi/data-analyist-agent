@@ -32,7 +32,7 @@ def repair_node(state: AgentState) -> dict:
     return {
         "repair_attempts": attempt,
         "repair_history": [*state.get("repair_history", []), failure_reason],
-        "last_failed_tool": decision.failed_tool,
+        "last_failed_tool": getattr(decision, "failed_tool", ""),
         "last_failure_reason": failure_reason,
         "repair_context": decision.repair_instruction,
         "trace": [*state.get("trace", []), f"Repair attempt {attempt}"],

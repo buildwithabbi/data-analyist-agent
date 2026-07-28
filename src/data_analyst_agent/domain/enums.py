@@ -1,5 +1,20 @@
 from enum import Enum
 
+
+class StepAction(str, Enum):
+    QUERY = "QUERY"
+    GENERATE_CHART = "GENERATE_CHART"
+    SUMMARIZE = "SUMMARIZE"
+    ANALYZE = "ANALYZE"
+    EXPORT = "EXPORT"
+
+
+class StepStatus(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
 class ExecutionStatus(str, Enum):
     """
     Final execution status produced by the Reflection node.

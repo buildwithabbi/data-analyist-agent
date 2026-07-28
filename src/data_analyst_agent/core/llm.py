@@ -1,10 +1,15 @@
+from langchain_core.messages import SystemMessage
 from langchain_groq import ChatGroq
 from groq import BadRequestError
 from ..tools import TOOLS
 from .config import GROQ_API_KEY
 from ..utils.console import print_json
 
-MODEL_NAME = [
+MODEL_NAME = "openai/gpt-oss-120b"
+MAX_TOKENS = 256 if MODEL_NAME == "llama-3.1-8b-instant" else 1024
+
+llm = ChatGroq(
+    model=MODEL_NAME,
     # ==========================================
     # 🌟 TOP-TIER REASONING & LARGE PRODUCTION MODELS
     
@@ -28,21 +33,13 @@ MODEL_NAME = [
     # # ==========================================
     # # 🏃 LIGHTWEIGHT, FAST & UTILITY MODELS
     # # ==========================================
-    "llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
+    #"llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
     # "openai/gpt-oss-safeguard-20b",  # Specialized model strictly tuned for content moderation and safety
     # # ==========================================
     # # 🎙️ AUDIO SPEECH-TO-TEXT MODELS
     # # ==========================================
     #"whisper-large-v3",              # Gold standard high-fidelity audio transcription
     # "whisper-large-v3-turbo"         # Maximum speed optimized audio transcription,
-    ]
-    # The 8B model has a tight 6k TPM allowance. Larger models need enough room
-    # to serialize a realistic SQL tool call without being truncated mid-JSON.
-MODEL_NAME = MODEL_NAME[0]
-MAX_TOKENS = 256 if MODEL_NAME == "llama-3.1-8b-instant" else 1024
-
-llm = ChatGroq(
-    model=MODEL_NAME,
     api_key=GROQ_API_KEY,
     temperature=0,
     max_tokens=MAX_TOKENS,
@@ -60,14 +57,25 @@ def safe_invoke(model, messages):
     except BadRequestError as e:
         print_json("LLM ERROR", {"type": "BadRequestError", "message": str(e)})
 
-        # The provider already rejected malformed tool-call JSON. Retrying the
-        # identical request cannot repair it and only consumes TPM quota.
-        if "tool_use_failed" in str(e):
-            raise
+        # Retrying an invalid tool generation unchanged only reproduces the
+        # provider error. Keep the selected tool/schema intact and make the
+        # required JSON argument format explicit for the corrective attempt.
+        corrective_messages = list(messages)
+        for index, message in enumerate(corrective_messages):
+            if isinstance(message, SystemMessage):
+                corrective_messages[index] = SystemMessage(
+                    content=(
+                        f"{message.content}\n\n"
+                        "Tool-call correction: call the selected function with a JSON "
+                        "object matching its schema. For run_sql this must be exactly "
+                        '{"query": "SELECT ..."}. Never place raw SQL directly inside '
+                        "a function tag."
+                    )
+                )
+                break
 
-        # Retry once
         try:
-            return model.invoke(messages)
+            return model.invoke(corrective_messages)
         except BadRequestError as retry_error:
             print_json(
                 "LLM ERROR",
@@ -83,16 +91,4 @@ def safe_invoke(model, messages):
         raise
 
 
-# Models are instructed to call one tool at a time, but prompting alone is not
-# a reliable guardrail.  Explicitly disable parallel calls so a large request
-# cannot fan out into many tool results that have to be included in the next
-# model request.
-llm_with_tools = llm.bind_tools(TOOLS, parallel_tool_calls=False)
-
-# Used only while the execution plan has an unfinished action. This prevents
-# smaller models from returning an empty assistant message before doing work.
-llm_with_required_tool = llm.bind_tools(
-    TOOLS,
-    tool_choice="required",
-    parallel_tool_calls=False,
-)
+llm_with_tools = llm.bind_tools(TOOLS)

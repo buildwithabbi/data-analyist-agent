@@ -3,6 +3,11 @@ from ..utils.console import print_json
 
 
 def route_tools(state):
+    # The executor detected an invalid/missing call for the current step.
+    # Send it to reflection so repair can handle it; do not execute the call.
+    if state.get("step_validation_error"):
+        return "end"
+
     last_message = state["messages"][-1]
 
     if isinstance(last_message, AIMessage):

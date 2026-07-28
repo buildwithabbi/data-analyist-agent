@@ -1,0 +1,16 @@
+from abc import ABC, abstractmethod
+
+from .models import KnowledgeChunk, KnowledgeDocument
+
+
+class KnowledgeRepository(ABC):
+    @abstractmethod
+    def store_document(self, document: KnowledgeDocument) -> KnowledgeDocument: ...
+    @abstractmethod
+    def store_chunks(self, chunks: list[KnowledgeChunk]) -> list[KnowledgeChunk]: ...
+    @abstractmethod
+    def get_document(self, document_id: str) -> KnowledgeDocument | None: ...
+    @abstractmethod
+    def chunks(self, *, document_id: str | None = None, tags: list[str] | None = None) -> list[KnowledgeChunk]: ...
+    @abstractmethod
+    def delete_document(self, document_id: str) -> bool: ...

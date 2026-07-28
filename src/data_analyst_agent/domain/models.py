@@ -1,11 +1,7 @@
-import datetime
-from typing import Optional
-from uuid import uuid4
 from pydantic.dataclasses import dataclass
 from pydantic import BaseModel, Field
 from enum import Enum
-
-from .enums import ExecutionStatus, ErrorCategory
+from .enums import ErrorCategory, ExecutionStatus, StepAction, StepStatus
 
 @dataclass
 class ToolResult:
@@ -13,13 +9,107 @@ class ToolResult:
     status: str
     result: dict | None = None
     message: str | None = None
+    typed_result: "SQLResult | ChartResult | None" = None
+
+
+class SQLResult(BaseModel):
+    query: str = ""
+    row_count: int = 0
+    rows: list[dict] = Field(default_factory=list)
+
+
+class ChartResult(BaseModel):
+    chart_path: str
+    chart_type: str
+    title: str
+    series_count: int = 1
+    series: list[str] = Field(default_factory=list)
+
+
+class Artifact(BaseModel):
+    """A typed output that later steps may consume by identifier."""
+
+    id: str
+    type: str
+    producer: str
+    payload: dict = Field(default_factory=dict)
+
+
+@dataclass
+class ExecutionRecord:
+    """Auditable outcome of a single planned execution step."""
+
+    step_number: int
+    step: str
+    tool: str | None
+    tool_input: dict | None
+    output: dict | None
+    success: bool
+    duration_seconds: float | None = None
+
+
+class PlanStep(BaseModel):
+    """A deterministic contract for one unit of plan execution."""
+
+    id: int = 0
+    action: StepAction
+    description: str
+    expected_tool: str | None = None
+    expected_output: str = ""
+    requires: list[str] = Field(default_factory=list)
+    inputs: list[str] = Field(default_factory=list)
+    dependencies: list[int] = Field(default_factory=list)
+    status: StepStatus = StepStatus.PENDING
+
+    def model_post_init(self, __context) -> None:
+        """Supply a safe contract when a planner omits multi-chart inputs."""
+        if self.expected_output == "multi_series_line_chart" and not self.inputs:
+            known_metrics = ("sales", "profit", "quantity", "discount")
+            description = self.description.lower()
+            self.inputs = [metric for metric in known_metrics if metric in description]
 
 
 @dataclass
 class Plan:
     goal: str
-    steps: list[str]
+    # ``str`` remains accepted so existing callers can construct legacy plans;
+    # it is normalized immediately into an executable PlanStep contract.
+    steps: list[PlanStep | str]
     current_step: int = 0
+
+    def __post_init__(self) -> None:
+        self.steps = [_normalise_step(step) for step in self.steps]
+        for index, step in enumerate(self.steps, start=1):
+            if step.id == 0:
+                step.id = index
+
+
+def _normalise_step(step: PlanStep | str) -> PlanStep:
+    if isinstance(step, PlanStep):
+        return step
+
+    description = str(step).strip()
+    lowered = description.lower()
+    if any(word in lowered for word in ("chart", "visual", "plot")):
+        return PlanStep(
+            action="GENERATE_CHART",
+            description=description,
+            expected_tool="generate_chart",
+            expected_output="chart",
+            requires=["run_sql"],
+        )
+    if any(word in lowered for word in ("summary", "summar", "insight", "report")):
+        return PlanStep(
+            action="SUMMARIZE",
+            description=description,
+            expected_output="natural-language summary grounded in prior results",
+        )
+    return PlanStep(
+        action="QUERY",
+        description=description,
+        expected_tool="run_sql",
+            expected_output="structured SQL result",
+    )
 
 
 @dataclass(kw_only=True)
@@ -30,23 +120,32 @@ class MemoryItem:
     timestamp: str
 
 
+
+
 class RepairDecision(BaseModel):
     """
-    Represents the outcome of execution analysis performed by the
-    Reflection/RepairService.
+    Structured output produced by the Reflection node.
 
-    This model acts as the contract between Reflection and the LangGraph
-    routing logic.
+    Reflection is responsible for deciding whether the
+    execution should continue, terminate, or enter the
+    Repair Loop.
+
+    This model serves as the contract between Reflection
+    and the Repair node.
     """
 
     status: ExecutionStatus = Field(
-        ...,
         description="Overall execution status."
+    )
+
+    error_category: ErrorCategory = Field(
+        default=ErrorCategory.UNKNOWN,
+        description="Classification of the detected failure."
     )
 
     requires_repair: bool = Field(
         default=False,
-        description="Whether the execution should be repaired."
+        description="Whether execution should be routed to the Repair node."
     )
 
     retry_allowed: bool = Field(
@@ -54,72 +153,12 @@ class RepairDecision(BaseModel):
         description="Whether another repair attempt is permitted."
     )
 
-    error_category: ErrorCategory = Field(
-        default=ErrorCategory.UNKNOWN,
-        description="Normalized category of the execution failure."
-    )
-
-    failure_reason: Optional[str] = Field(
-        default=None,
+    failure_reason: str = Field(
+        default="",
         description="Human-readable explanation of the failure."
     )
 
-    failed_tool: Optional[str] = Field(
-        default=None,
-        description="Name of the tool that failed."
+    repair_instruction: str = Field(
+        default="",
+        description="Guidance for the Repair node to generate a corrected execution."
     )
-
-    retry_count: int = Field(
-        default=0,
-        ge=0,
-        description="Current repair attempt count."
-    )
-
-    repair_instruction: str | None = Field(
-        default=None,
-        description="Guidance supplied to the repair workflow.",
-    )
-
-    class Config:
-        frozen = True
-
-
-class RepairRecord(BaseModel):
-
-    attempt: int
-
-    failure_reason: str
-
-    previous_plan: Plan
-
-    repaired_plan: Plan
-
-    timestamp: datetime.datetime
-
-
-class ExecutionRecord(BaseModel):
-
-    step_number: int
-
-    tool_name: str
-
-    tool_input: dict
-
-    tool_output: str
-
-    success: bool
-
-    started_at: datetime.datetime
-
-    completed_at: datetime.datetime
-
-
-
-
-
-class MemoryItem(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    content: str
-    category: str
-    importance: float
-    timestamp: datetime.datetime

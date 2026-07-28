@@ -9,6 +9,7 @@ from .nodes import (
     repair_node,
     memory_node,
     memory_update_node,
+    validator_node,
 )
 
 from ..tools import TOOLS
@@ -32,6 +33,7 @@ builder.add_node("executor", executor)
 builder.add_node("tool", ToolNode(TOOLS))
 
 builder.add_node("reflection", reflection_node)
+builder.add_node("validator", validator_node)
 
 builder.add_node("repair", repair_node)
 
@@ -53,7 +55,7 @@ builder.add_conditional_edges(
     route_tools,
     {
         "tool": "tool",
-        "final": "memory_update",
+        "end": "validator",
     },
 )
 
@@ -63,8 +65,10 @@ builder.add_conditional_edges(
 
 builder.add_edge(
     "tool",
-    "reflection",
+    "validator",
 )
+
+builder.add_edge("validator", "reflection")
 
 # -----------------------------
 # Reflection
@@ -75,10 +79,8 @@ builder.add_conditional_edges(
     route_reflection,
     {
         "repair": "repair",
-        # A successful tool call is an observation, not completion.  Return to
-        # the executor so the model can use its result to make the next tool
-        # call or provide the final answer.
-        "continue": "executor",
+        "continue_execution": "executor",
+        "memory_update": "memory_update",
         "end": END,
     },
 )

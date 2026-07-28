@@ -1,57 +1,40 @@
+from langchain_core.messages import HumanMessage
+
 from ..tools import TOOLS, get_schema_text
 from ..utils.console import pretty_json
 
 
-# Tool output is part of the next model request.  Keep that request bounded:
-# SQL queries can otherwise return thousands of rows and every executor loop
-# would include all of them again.
-MAX_CONTEXT_TOOL_RESULTS = 3
-MAX_CONTEXT_ROWS_PER_RESULT = 20
-MAX_CONTEXT_VALUE_CHARS = 8_000
-
-
-def _compact_tool_result(result: dict) -> str:
-    """Format a useful, bounded representation of a tool result for the LLM."""
-    compact = dict(result)
-    rows = compact.get("rows")
-
-    if isinstance(rows, list) and len(rows) > MAX_CONTEXT_ROWS_PER_RESULT:
-        compact["rows"] = rows[:MAX_CONTEXT_ROWS_PER_RESULT]
-        compact["rows_truncated"] = len(rows) - MAX_CONTEXT_ROWS_PER_RESULT
-
-    value = pretty_json(compact)
-    if len(value) > MAX_CONTEXT_VALUE_CHARS:
-        omitted = len(value) - MAX_CONTEXT_VALUE_CHARS
-        value = (
-            f"{value[:MAX_CONTEXT_VALUE_CHARS]}\n"
-            f"... output truncated ({omitted} characters omitted)"
-        )
-    return value
-
-
 def build_context(state):
+    question = next(
+        (
+            message.content
+            for message in reversed(state["messages"])
+            if isinstance(message, HumanMessage)
+        ),
+        "",
+    )
+
     plan = state.get("plan")
 
     if plan:
-        plan_text = "\n".join(
-            f"{index + 1}. {step}"
-            for index, step in enumerate(plan.steps)
-        )
-
-        plan_text = (
-            f"Goal: {plan.goal}\n"
-            f"Current step: {plan.current_step}\n"
-            f"Steps:\n{plan_text}"
-        )
+        if plan.current_step < len(plan.steps):
+            current_step = plan.steps[plan.current_step]
+            plan_text = (
+                f"Goal: {plan.goal}\n"
+                f"Current step ({plan.current_step + 1} of {len(plan.steps)}): "
+                f"{current_step.description}\n"
+                f"Action: {current_step.action}\n"
+                f"Expected tool: {current_step.expected_tool or 'none'}\n"
+                f"Required prior tools: {', '.join(current_step.requires) or 'none'}\n"
+                f"Required inputs/metrics: {', '.join(current_step.inputs) or 'none'}\n"
+                f"Expected output: {current_step.expected_output}\n\n"
+                "Execute only this contract. Use prior tool results as the source "
+                "of truth; never invent or manually reconstruct their data."
+            )
+        else:
+            plan_text = f"Goal: {plan.goal}\nAll planned steps are complete."
     else:
         plan_text = "No plan created yet."
-
-    final_step = bool(plan and plan.steps and plan.current_step >= len(plan.steps) - 1)
-    next_action = (
-        "Use the execution history to answer the user now. Do not call a tool."
-        if final_step
-        else "Call exactly one tool, wait for its result, then follow the current plan step."
-    )
 
     schema = get_schema_text()
 
@@ -69,21 +52,43 @@ def build_context(state):
 
     sections.append(
         f"""
-You are a SQLite data analyst. Use only table `sales` and the schema below;
-write SQLite SELECT queries only. Give final answers as prose or a Markdown
-table, never raw JSON.
+You are an expert SQLite Data Analyst.
 
-SQLite date rule: never use `EXTRACT`. Use `strftime('%Y', order_date)`,
-`strftime('%m', order_date)`, or `strftime('%Y-%m', order_date)`.
+Database Schema:
 
-Schema: {schema}
-Tools: {tool_names}
-Plan: {plan_text}
+{schema}
 
-For a requested chart: query `label` (text) and `value` (number), then call
-`generate_chart` using exactly the returned values; include its path in the
-answer. Complete one measure at a time and never invent chart data.
-{next_action}
+Available Tools:
+
+{tool_names}
+
+Execution Plan:
+
+{plan_text}
+
+User Question:
+
+{question}
+
+Rules:
+- Only use the table 'sales'
+- Never invent table names
+- Never invent columns
+- Only generate SQLite SQL.
+- Always present final results as a natural-language summary or markdown table, never raw JSON.
+- Generate charts using 'generate_chart' if the user requests a chart.
+- The chart must be saved in the 'charts' directory and the path included in the final answer.
+- To prepare a chart, first query a compact dataset with exactly two aliases:
+  `label` (text) and `value` (numeric). For example, use
+  `strftime('%Y-%m', order_date) AS label, SUM(sales) AS value`.
+- Call `generate_chart` only after that SQL result is available. Its `data`
+  argument must be an array of {{"label": "...", "value": number}} objects.
+
+Tool Usage Rules:
+1. Call ONLY ONE tool at a time.
+2. Wait for the tool result before deciding the next tool.
+3. Never call multiple dependent tools in one response.
+4. Think → Tool → Observe → Think Again.
 """
     )
 
@@ -124,13 +129,26 @@ Repair Rules:
 
     if memory:
 
-        sections.append("Session Memory:")
+        sections.append("Relevant Long-Term Memory:")
 
         for item in memory:
-            sections.append(
-                f"- [{item.category}, importance={item.importance:.2f}] "
-                f"{item.content} ({item.timestamp})"
-            )
+            # Durable records are the primary shape. The fallback keeps
+            # context construction compatible with older in-session items.
+            if hasattr(item, "metadata"):
+                sections.append(
+                    f"- [{item.kind.value}, importance={item.score.importance:.2f}, "
+                    f"confidence={item.score.confidence:.2f}] {item.content}"
+                )
+            else:
+                sections.append(
+                    f"- [{item.category}, importance={item.importance:.2f}] "
+                    f"{item.content} ({item.timestamp})"
+                )
+
+    knowledge = state.get("knowledge", [])
+    if knowledge:
+        sections.append("Relevant Knowledge (cite these sources in final responses):")
+        sections.extend(f"- [{hit.citation}; confidence={hit.score:.2f}] {hit.chunk.text}" for hit in knowledge)
 
     # ---------------------------------------------------------
     # Execution History
@@ -142,13 +160,7 @@ Repair Rules:
 
         sections.append("Execution History:")
 
-        omitted_results = len(tool_results) - MAX_CONTEXT_TOOL_RESULTS
-        if omitted_results > 0:
-            sections.append(
-                f"- {omitted_results} older tool result(s) omitted to keep the request small."
-            )
-
-        for tool in tool_results[-MAX_CONTEXT_TOOL_RESULTS:]:
+        for tool in tool_results:
 
             section = f"""
 Tool   : {tool.tool}
@@ -159,7 +171,7 @@ Status : {tool.status}
                 section += f"""
 
 Result:
-{_compact_tool_result(tool.result)}
+{pretty_json(tool.result)}
 """
 
             if tool.message:
@@ -172,82 +184,3 @@ Error:
             sections.append(section)
 
     return "\n\n".join(sections)
-
-
-
-
-def build_repair_context(state) -> str:
-    """
-    Build a dedicated context for repairing a failed execution plan.
-    """
-
-    plan = state.get("plan")
-
-    if plan:
-        plan_text = "\n".join(
-            f"{idx + 1}. {step}"
-            for idx, step in enumerate(plan.steps)
-        )
-    else:
-        plan_text = "No execution plan available."
-
-    tool_results = state.get("tool_results", [])
-
-    latest_result = tool_results[-1] if tool_results else None
-
-    latest_error = latest_result.message if latest_result else "Unknown"
-
-    latest_tool = latest_result.tool if latest_result else "Unknown"
-
-    schema = get_schema_text()
-
-    tool_names = "\n".join(
-        f"- {tool.name}"
-        for tool in TOOLS
-        if tool.name != "get_schema"
-    )
-
-    return f"""
-You are repairing an execution plan.
-
-Do NOT create a completely new strategy.
-
-Only modify the part of the plan that caused the failure.
-
-Original Plan
-
-Goal:
-{plan.goal if plan else "Unknown"}
-
-Steps
-
-{plan_text}
-
-Failed Tool
-
-{latest_tool}
-
-Failure
-
-{latest_error}
-
-Retry Attempt
-
-{state.get("repair_attempts",0)}
-
-Available Tools
-
-{tool_names}
-
-Database Schema
-
-{schema}
-
-Instructions
-
-1. Preserve successful work.
-2. Do not restart the workflow.
-3. Fix only the failed step.
-4. Prefer minimal changes.
-5. Return a corrected execution plan.
-"""

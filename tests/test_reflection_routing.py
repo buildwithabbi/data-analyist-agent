@@ -1,6 +1,6 @@
 from data_analyst_agent.agent.reflection_routing import route_reflection
 from data_analyst_agent.domain.enums import ExecutionStatus
-from data_analyst_agent.domain.models import RepairDecision
+from data_analyst_agent.domain.models import Plan, RepairDecision
 
 
 def test_route_success():
@@ -11,7 +11,7 @@ def test_route_success():
         )
     }
 
-    assert route_reflection(state) == "continue"
+    assert route_reflection(state) == "memory_update"
 
 
 def test_route_repair():
@@ -23,6 +23,15 @@ def test_route_repair():
     }
 
     assert route_reflection(state) == "repair"
+
+
+def test_route_continues_when_plan_has_more_steps():
+    state = {
+        "plan": Plan(goal="Analyze sales", steps=["Run SQL", "Summarize"]),
+        "repair_decision": RepairDecision(status=ExecutionStatus.SUCCESS),
+    }
+
+    assert route_reflection(state) == "continue_execution"
 
 
 def test_route_end():
