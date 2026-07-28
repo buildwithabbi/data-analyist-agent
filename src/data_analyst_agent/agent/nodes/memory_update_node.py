@@ -1,42 +1,12 @@
 """Memory-persistence workflow node."""
 
-from datetime import datetime, timezone
-
-from ...domain.models import MemoryItem
-from ...memory.short_term import add_memory
+from ...memory.manager import memory_manager
 from ..state import AgentState
 
 
 def memory_update_node(state: AgentState) -> dict:
     print("➡️ Memory Update")
-    tool_results = state.get("tool_results", [])
-
-    if not tool_results:
-        return {}
-
-    latest = tool_results[-1]
-    if latest.status != "success":
-        return {}
-
-    if latest.tool == "run_sql":
-        row_count = latest.result.get("row_count", 0)
-        add_memory(
-            MemoryItem(
-                content=f"Executed SQL successfully and returned {row_count} rows.",
-                importance=0.80,
-                category="tool",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            )
-        )
-    elif latest.tool == "generate_chart":
-        title = latest.result.get("title", "Chart")
-        add_memory(
-            MemoryItem(
-                content=f"Generated chart '{title}'.",
-                importance=0.92,
-                category="tool",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            )
-        )
-
-    return {}
+    memory = memory_manager.write(state)
+    trace = list(state.get("trace", []))
+    trace.append("🧠 Stored durable episode memory" if memory else "🧠 Execution not retained as durable memory")
+    return {"trace": trace}

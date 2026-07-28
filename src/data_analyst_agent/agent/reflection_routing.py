@@ -1,4 +1,5 @@
 from data_analyst_agent.domain.enums import ExecutionStatus
+from data_analyst_agent.services.repair import has_remaining_steps
 
 
 def route_reflection(state):
@@ -13,6 +14,8 @@ def route_reflection(state):
         return "end"
 
     if decision.status == ExecutionStatus.SUCCESS:
+        if has_remaining_steps(state.get("plan")):
+            return "continue_execution"
         return "memory_update"
 
     if decision.status == ExecutionStatus.RECOVERABLE_FAILURE:

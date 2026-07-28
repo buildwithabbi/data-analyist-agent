@@ -6,6 +6,7 @@ from .memory_update_node import memory_update_node
 from .planner_node import planner_node
 from .reflection_node import reflection_node
 from .repair_node import repair_node
+from .validator_node import validator_node
 
 __all__ = [
     "executor",
@@ -14,4 +15,5 @@ __all__ = [
     "planner_node",
     "reflection_node",
     "repair_node",
+    "validator_node",
 ]

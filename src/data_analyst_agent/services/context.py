@@ -17,16 +17,22 @@ def build_context(state):
     plan = state.get("plan")
 
     if plan:
-        plan_text = "\n".join(
-            f"{index + 1}. {step}"
-            for index, step in enumerate(plan.steps)
-        )
-
-        plan_text = (
-            f"Goal: {plan.goal}\n"
-            f"Current step: {plan.current_step}\n"
-            f"Steps:\n{plan_text}"
-        )
+        if plan.current_step < len(plan.steps):
+            current_step = plan.steps[plan.current_step]
+            plan_text = (
+                f"Goal: {plan.goal}\n"
+                f"Current step ({plan.current_step + 1} of {len(plan.steps)}): "
+                f"{current_step.description}\n"
+                f"Action: {current_step.action}\n"
+                f"Expected tool: {current_step.expected_tool or 'none'}\n"
+                f"Required prior tools: {', '.join(current_step.requires) or 'none'}\n"
+                f"Required inputs/metrics: {', '.join(current_step.inputs) or 'none'}\n"
+                f"Expected output: {current_step.expected_output}\n\n"
+                "Execute only this contract. Use prior tool results as the source "
+                "of truth; never invent or manually reconstruct their data."
+            )
+        else:
+            plan_text = f"Goal: {plan.goal}\nAll planned steps are complete."
     else:
         plan_text = "No plan created yet."
 
@@ -123,13 +129,26 @@ Repair Rules:
 
     if memory:
 
-        sections.append("Session Memory:")
+        sections.append("Relevant Long-Term Memory:")
 
         for item in memory:
-            sections.append(
-                f"- [{item.category}, importance={item.importance:.2f}] "
-                f"{item.content} ({item.timestamp})"
-            )
+            # Durable records are the primary shape. The fallback keeps
+            # context construction compatible with older in-session items.
+            if hasattr(item, "metadata"):
+                sections.append(
+                    f"- [{item.kind.value}, importance={item.score.importance:.2f}, "
+                    f"confidence={item.score.confidence:.2f}] {item.content}"
+                )
+            else:
+                sections.append(
+                    f"- [{item.category}, importance={item.importance:.2f}] "
+                    f"{item.content} ({item.timestamp})"
+                )
+
+    knowledge = state.get("knowledge", [])
+    if knowledge:
+        sections.append("Relevant Knowledge (cite these sources in final responses):")
+        sections.extend(f"- [{hit.citation}; confidence={hit.score:.2f}] {hit.chunk.text}" for hit in knowledge)
 
     # ---------------------------------------------------------
     # Execution History

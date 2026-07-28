@@ -33,6 +33,13 @@ class ChartDataPoint(BaseModel):
     value: float
 
 
+class ChartSeries(BaseModel):
+    """One labelled series in a multi-series chart."""
+
+    name: str
+    data: list[ChartDataPoint]
+
+
 def get_schema_text():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -230,9 +237,10 @@ def get_schema() -> str:
 
 @tool
 def generate_chart(
-    data: list[ChartDataPoint],
     chart_type: Literal["bar", "line", "pie", "scatter"],
     title: str,
+    data: list[ChartDataPoint] | None = None,
+    series: list[ChartSeries] | None = None,
 ) -> str:
     """
     Generate a chart from SQL query results.
@@ -291,6 +299,54 @@ def generate_chart(
     fig = None
 
     try:
+        if series:
+            if chart_type != "line":
+                return pretty_json(
+                    {
+                        "status": "error",
+                        "tool": "generate_chart",
+                        "message": "Multi-series charts currently require chart_type 'line'.",
+                    }
+                )
+
+            fig, ax = plt.subplots(figsize=(12, 7))
+            for chart_series in series:
+                rows = [point.model_dump() for point in chart_series.data]
+                if not rows:
+                    return pretty_json(
+                        {"status": "error", "tool": "generate_chart", "message": "A chart series is empty."}
+                    )
+                df = pd.DataFrame(rows).dropna(subset=["label", "value"])
+                ax.plot(df["label"], df["value"], marker="o", label=chart_series.name)
+
+            ax.set_xlabel("label")
+            ax.set_ylabel("value")
+            ax.set_title(title)
+            ax.legend()
+            fig.autofmt_xdate()
+
+            charts_dir = PROJECT_ROOT / "charts"
+            charts_dir.mkdir(exist_ok=True)
+            safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
+            chart_path = charts_dir / f"{safe_title}.png"
+            fig.savefig(chart_path, dpi=300, bbox_inches="tight")
+            return pretty_json(
+                {
+                    "status": "success",
+                    "tool": "generate_chart",
+                    "chart_path": str(chart_path.relative_to(PROJECT_ROOT)),
+                    "chart_type": chart_type,
+                    "title": title,
+                    "series_count": len(series),
+                    "series": [item.name for item in series],
+                }
+            )
+
+        if data is None:
+            return pretty_json(
+                {"status": "error", "tool": "generate_chart", "message": "Provide data or series."}
+            )
+
         rows = [point.model_dump() for point in data]
 
         if not isinstance(rows, list):
@@ -403,6 +459,7 @@ def generate_chart(
                 "chart_path": str(chart_path.relative_to(PROJECT_ROOT)),
                 "chart_type": chart_type,
                 "title": title,
+                "series_count": 1,
             }
         )
 

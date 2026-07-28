@@ -1,3 +1,4 @@
+from langchain_core.messages import SystemMessage
 from langchain_groq import ChatGroq
 from groq import BadRequestError
 from ..tools import TOOLS
@@ -10,7 +11,7 @@ llm = ChatGroq(
     # 🌟 TOP-TIER REASONING & LARGE PRODUCTION MODELS
     
     # ==========================================
-    #"openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
+    "openai/gpt-oss-120b",  # Highest rated overall, heavy reasoning + built-in search/code execution
     #"llama-3.3-70b-versatile",       # Best balanced open-weight production model (high capacity, multi-tool use)
     #"deepseek-r1-distill-llama-70b", # Exceptional specialized model for advanced logic, math, and coding tasks
     # # ==========================================
@@ -29,7 +30,7 @@ llm = ChatGroq(
     # # ==========================================
     # # 🏃 LIGHTWEIGHT, FAST & UTILITY MODELS
     # # ==========================================
-    "llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
+    #"llama-3.1-8b-instant",          # The go-to lightweight model for high-throughput, low-latency text tasks
     # "openai/gpt-oss-safeguard-20b",  # Specialized model strictly tuned for content moderation and safety
     # # ==========================================
     # # 🎙️ AUDIO SPEECH-TO-TEXT MODELS
@@ -53,9 +54,25 @@ def safe_invoke(model, messages):
     except BadRequestError as e:
         print_json("LLM ERROR", {"type": "BadRequestError", "message": str(e)})
 
-        # Retry once
+        # Retrying an invalid tool generation unchanged only reproduces the
+        # provider error. Keep the selected tool/schema intact and make the
+        # required JSON argument format explicit for the corrective attempt.
+        corrective_messages = list(messages)
+        for index, message in enumerate(corrective_messages):
+            if isinstance(message, SystemMessage):
+                corrective_messages[index] = SystemMessage(
+                    content=(
+                        f"{message.content}\n\n"
+                        "Tool-call correction: call the selected function with a JSON "
+                        "object matching its schema. For run_sql this must be exactly "
+                        '{"query": "SELECT ..."}. Never place raw SQL directly inside '
+                        "a function tag."
+                    )
+                )
+                break
+
         try:
-            return model.invoke(messages)
+            return model.invoke(corrective_messages)
         except BadRequestError as retry_error:
             print_json(
                 "LLM ERROR",

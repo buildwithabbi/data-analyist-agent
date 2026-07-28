@@ -1,11 +1,15 @@
 from typing import Annotated
-from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage
-from ..domain.models import MemoryItem, Plan, ToolResult, RepairDecision
-from typing import Annotated
 from typing_extensions import NotRequired, TypedDict
 from langgraph.graph.message import add_messages
+
+from ..domain.models import (
+    Artifact,
+    ExecutionRecord,
+    MemoryItem,
+    Plan,
+    RepairDecision,
+    ToolResult,
+)
 
 
 
@@ -23,8 +27,23 @@ class AgentState(TypedDict):
     # Memory
     memory: NotRequired[list[MemoryItem]]
 
+    # Retrieved, citable external knowledge for the current run.
+    knowledge: NotRequired[list]
+
     # Tool execution
     tool_results: NotRequired[list[ToolResult]]
+
+    # Completed plan steps, including their tool inputs and outputs.
+    execution_records: NotRequired[list[ExecutionRecord]]
+
+    artifacts: NotRequired[list[Artifact]]
+
+    # A deterministic validation failure awaiting reflection/repair.
+    step_validation_error: NotRequired[str]
+
+    validation_complete: NotRequired[bool]
+
+    evaluation_error: NotRequired[str]
 
     # Execution trace
     trace: NotRequired[list[str]]

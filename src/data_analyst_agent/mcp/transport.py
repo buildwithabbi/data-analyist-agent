@@ -1,0 +1,13 @@
+from abc import ABC, abstractmethod
+class MCPTransport(ABC):
+    @abstractmethod
+    def connect(self): ...
+    @abstractmethod
+    def close(self): ...
+    @abstractmethod
+    def list_tools(self) -> list[dict]: ...
+    def list_resources(self) -> list[dict]: return []
+    def list_prompts(self) -> list[dict]: return []
+    @abstractmethod
+    def call_tool(self, name: str, arguments: dict): ...
+    def read_resource(self, uri: str): raise NotImplementedError

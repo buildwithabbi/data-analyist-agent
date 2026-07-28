@@ -14,7 +14,7 @@ from data_analyst_agent.domain.enums import (
     ErrorCategory,
     ExecutionStatus,
 )
-from data_analyst_agent.domain.models import RepairDecision
+from data_analyst_agent.domain.models import Plan, RepairDecision
 from constants import MAX_REPAIR_ATTEMPTS
 
 
@@ -63,6 +63,11 @@ def analyze_execution(state: AgentState) -> RepairDecision:
         retry_allowed=False,
         failure_reason=latest.message,
     )
+
+
+def has_remaining_steps(plan: Plan | None) -> bool:
+    """Return whether a plan has an unexecuted step."""
+    return plan is not None and plan.current_step < len(plan.steps)
 
 
 def classify_error(message: str) -> ErrorCategory:

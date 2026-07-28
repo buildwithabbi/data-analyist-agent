@@ -12,18 +12,44 @@ Create a short, executable plan for the data-analysis agent.
 Return only valid JSON in this exact shape:
 {
   "goal": "short description of the user's request",
-  "steps": ["Step one", "Step two", "Step three"],
+  "steps": [
+    {
+      "action": "QUERY",
+      "description": "Retrieve the required monthly metrics in one SQL query",
+      "expected_tool": "run_sql",
+      "expected_output": "structured rows for analysis",
+      "requires": [],
+      "inputs": []
+    },
+    {
+      "action": "GENERATE_CHART",
+      "description": "Visualize the retrieved metrics",
+      "expected_tool": "generate_chart",
+      "expected_output": "multi_series_line_chart",
+      "requires": ["run_sql"],
+      "inputs": ["sales", "profit", "quantity", "discount"]
+    },
+    {
+      "action": "SUMMARIZE",
+      "description": "Summarize findings using the retrieved results",
+      "expected_tool": null,
+      "expected_output": "grounded natural-language summary",
+      "requires": ["run_sql", "generate_chart"],
+      "inputs": []
+    }
+  ],
   "current_step": 0
 }
 
 Use only the tools and capabilities available to this agent. For a request that
-needs a chart, use concise steps such as "Run SQL", "Generate Chart", and
-"Summarize". Do not include setup, pandas, Plotly, or manual data-cleaning
-steps.
+needs a chart, use concise logical tasks: retrieve the needed metrics, visualize
+them, then summarize. Do not split SQL aggregation into a separate task when it
+can be part of retrieval. Do not include setup, pandas, Plotly, or manual
+data-cleaning steps.
 """
 
 from ..core.llm import llm
-from ..domain.models import Plan
+from ..domain.models import Plan, PlanStep
 
 
 def _plan_from_response(goal: str, response_text: str) -> Plan:
@@ -37,7 +63,12 @@ def _plan_from_response(goal: str, response_text: str) -> Plan:
     try:
         payload = json.loads(cleaned_response)
         if isinstance(payload, dict) and isinstance(payload.get("steps"), list):
-            steps = [str(step).strip() for step in payload["steps"] if str(step).strip()]
+            steps = []
+            for step in payload["steps"]:
+                if isinstance(step, dict) and step.get("description"):
+                    steps.append(PlanStep(**step))
+                elif isinstance(step, str) and step.strip():
+                    steps.append(step.strip())
             current_step = int(payload.get("current_step", 0))
             return Plan(
                 goal=str(payload.get("goal") or goal).strip(),
@@ -62,10 +93,29 @@ def _plan_from_response(goal: str, response_text: str) -> Plan:
     return Plan(goal=goal, steps=steps, current_step=0)
 
 
-def create_plan(question: str) -> Plan:
+def create_plan(question: str, memories: list | None = None, knowledge: list | None = None) -> Plan:
+
+    memory_context = ""
+    if memories:
+        rendered = []
+        for memory in memories:
+            if hasattr(memory, "metadata"):
+                rendered.append(
+                    f"- [{memory.kind.value}, confidence={memory.score.confidence:.2f}] {memory.content}"
+                )
+            else:
+                rendered.append(f"- {memory.content}")
+        memory_context = (
+            "\nRelevant past experience (use it as guidance, not as evidence for the answer):\n"
+            + "\n".join(rendered)
+        )
+    if knowledge:
+        memory_context += "\nRelevant external knowledge (cite sources; do not make unsupported claims):\n" + "\n".join(
+            f"- [{item.citation}; confidence={item.score:.2f}] {item.chunk.text}" for item in knowledge
+        )
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT + memory_context),
         ("human", question),
     ]
 
