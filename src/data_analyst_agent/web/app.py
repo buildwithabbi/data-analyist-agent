@@ -22,6 +22,7 @@ from langchain_core.messages import HumanMessage
 from data_analyst_agent.agent.graph import graph
 from data_analyst_agent.core.llm import MODEL_NAME
 from data_analyst_agent.security.guardrails import SecurityGuardrails
+from data_analyst_agent.security.jwt_auth import JWTManager
 from data_analyst_agent.vision.analyzer import VisionAnalyzer
 from data_analyst_agent.services.datasets import arrow_safe_preview, load_tabular_dataset
 from data_analyst_agent.services.response_cache import response_cache
@@ -354,6 +355,59 @@ def _discover_all_project_databases() -> list[Path]:
     return sorted(discovered, key=lambda x: x.name)
 
 
+# User Accounts Repository for Authentication Gate
+USERS_DB = {
+    "admin": {"password_hash": sha256("admin123".encode()).hexdigest(), "role": "Admin", "name": "System Administrator"},
+    "analyst": {"password_hash": sha256("analyst123".encode()).hexdigest(), "role": "Analyst", "name": "Data Analyst"},
+    "viewer": {"password_hash": sha256("viewer123".encode()).hexdigest(), "role": "Viewer", "name": "Business Executive"},
+}
+
+
+def _login_screen() -> None:
+    """Renders a modern enterprise login portal when unauthenticated."""
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🔒 Agentic AI Data Analyst Login")
+        st.caption("Enter your credentials to access the analytics workspace.")
+        
+        with st.form("login_form"):
+            username = st.text_input("Username", value="admin")
+            password = st.text_input("Password", type="password", value="admin123")
+            submit = st.form_submit_button("🔑 Sign In to Workspace", type="primary", use_container_width=True)
+            
+            if submit:
+                user_info = USERS_DB.get(username.strip().lower())
+                if user_info and user_info["password_hash"] == sha256(password.encode()).hexdigest():
+                    token = JWTManager.create_token({
+                        "username": username,
+                        "role": user_info["role"],
+                        "name": user_info["name"]
+                    })
+                    st.session_state.authenticated = True
+                    st.session_state.current_user = user_info
+                    st.session_state.current_username = username
+                    st.session_state.jwt_token = token
+                    st.success(f"Welcome back, {user_info['name']}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password. Please try again.")
+
+        with st.expander("🔑 Demo Accounts (Click to view test credentials)", expanded=True):
+            st.markdown("""
+            - **Admin**: Username `admin` | Password `admin123` *(Full System Access)*
+            - **Analyst**: Username `analyst` | Password `analyst123` *(Analytics & SQL Access)*
+            - **Viewer**: Username `viewer` | Password `viewer123` *(Read-Only Dashboard)*
+            """)
+
+
+def _logout_user() -> None:
+    """Callback to log out user and reset authentication state."""
+    st.session_state.authenticated = False
+    st.session_state.current_user = None
+    st.session_state.jwt_token = None
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Agentic AI Data Analyst Hub",
@@ -398,6 +452,14 @@ def main() -> None:
         </style>
     """, unsafe_allow_html=True)
 
+    # Enforce Authentication Gate
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        _login_screen()
+        return
+
     # Initialize Session State
     if "database_path" not in st.session_state:
         st.session_state.database_path = PROJECT_ROOT / "database" / "sales.db"
@@ -412,6 +474,12 @@ def main() -> None:
 
     # --- SIDEBAR ---
     with st.sidebar:
+        # Sidebar User Profile & Logout Badge
+        u_info = st.session_state.get("current_user", {})
+        st.caption(f"👤 Logged in as **{u_info.get('name', 'User')}** (`{u_info.get('role', 'Viewer')}`)")
+        st.button("🚪 Sign Out", on_click=_logout_user, use_container_width=True)
+        st.divider()
+
         st.header("📂 Dataset & Schema")
         upload = st.file_uploader("Upload CSV or Excel", type=["csv", "xls", "xlsx"])
         if upload and st.button("🚀 Load Dataset into Database", type="primary"):
