@@ -190,7 +190,10 @@ The default graph actively uses both subsystems during its memory node.
 
 - `memory/` provides repository-backed durable memory. `MemoryManager` is the
   public façade over SQLite storage, retrieval/ranking, writing, compression,
-  lifecycle updates, and deduplication.
+  lifecycle updates, and deduplication. Each episode is tagged with a SHA-256
+  fingerprint of the active SQLite dataset, so only memories from the same
+  dataset are retrieved. A matching memory guides planning, but the agent
+  always reruns SQL and validates fresh results.
 - `knowledge/` provides a small local knowledge base. `KnowledgeManager` can
   ingest a file or inline text, clean and chunk it, generate local hash
   embeddings, store it in SQLite, retrieve candidates with hybrid retrieval,
@@ -200,6 +203,15 @@ The default graph actively uses both subsystems during its memory node.
 Neither the CLI nor dashboard currently exposes a document-ingestion control;
 use `knowledge_manager.ingest(path)` or `knowledge_manager.add_text(text)`
 from Python when adding knowledge programmatically.
+
+### Response cache
+
+Completed responses are cached by the active dataset fingerprint and a
+normalized exact question. Repeating the same question for unchanged data
+returns the cached answer and chart without calling the model or executing
+SQL. Use **Refresh analysis** in the dashboard or `--refresh` in the CLI to
+bypass the cache. Similar but non-identical questions still run the agent and
+may use same-dataset durable memory as planning guidance.
 
 ## Extension modules
 

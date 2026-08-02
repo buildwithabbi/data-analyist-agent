@@ -3,6 +3,7 @@ import re
 import sqlite3
 import logging
 from contextvars import ContextVar
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -57,6 +58,15 @@ def set_database_path(path: str | Path | None = None) -> Path:
 
 def _active_database_path() -> Path:
     return _database_path.get()
+
+
+def active_dataset_id() -> str:
+    """Return a content fingerprint used to isolate durable memory by dataset."""
+    digest = sha256()
+    with _active_database_path().open("rb") as database:
+        for block in iter(lambda: database.read(1024 * 1024), b""):
+            digest.update(block)
+    return f"sha256:{digest.hexdigest()}"
 
 
 def get_schema_text():

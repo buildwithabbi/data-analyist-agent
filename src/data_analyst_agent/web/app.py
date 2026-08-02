@@ -20,7 +20,8 @@ from langchain_core.messages import HumanMessage
 
 from data_analyst_agent.agent.graph import graph
 from data_analyst_agent.services.datasets import arrow_safe_preview, load_tabular_dataset
-from data_analyst_agent.tools.analytics import PROJECT_ROOT, set_database_path
+from data_analyst_agent.services.response_cache import response_cache
+from data_analyst_agent.tools.analytics import PROJECT_ROOT, active_dataset_id, set_database_path
 
 
 UPLOAD_DIR = PROJECT_ROOT / "database" / "uploads"
@@ -87,32 +88,45 @@ def main() -> None:
         placeholder="Compare monthly sales and profit, then create a chart.",
         height=90,
     )
+    refresh = st.checkbox("Refresh analysis", help="Bypass the saved response and rerun the agent.")
     if st.button("Analyze", type="primary", disabled=not question.strip()):
         set_database_path(st.session_state.database_path)
-        with st.status("Planning, querying, validating, and analyzing…", expanded=True) as status:
-            try:
-                result = graph.invoke({"messages": [HumanMessage(content=question)], "trace": []}, config={"recursion_limit": 100})
-            except Exception as error:
-                status.update(label="Analysis failed", state="error")
-                if "rate_limit" in str(error).lower() or "rate limit" in str(error).lower():
-                    st.warning("Groq's rate limit was reached. Wait for the period shown in the error, then run the analysis again.")
-                st.error(
-                    "The analysis could not complete. Check that GROQ_API_KEY is set "
-                    f"and try again. Details: {error}"
-                )
-                return
-            status.update(label="Analysis complete", state="complete")
+        dataset_id = active_dataset_id()
+        cached = None if refresh else response_cache.get(dataset_id, question)
+        if cached:
+            st.info("Returned a cached answer for this exact question and dataset. Select Refresh analysis to rerun it.")
+            answer, artifacts, trace, tool_results = (
+                cached["answer"], cached.get("artifacts", []), cached.get("trace", []), cached.get("tool_results", []),
+            )
+        else:
+            with st.status("Planning, querying, validating, and analyzing…", expanded=True) as status:
+                try:
+                    result = graph.invoke({"messages": [HumanMessage(content=question)], "trace": []}, config={"recursion_limit": 100})
+                except Exception as error:
+                    status.update(label="Analysis failed", state="error")
+                    if "rate_limit" in str(error).lower() or "rate limit" in str(error).lower():
+                        st.warning("Groq's rate limit was reached. Wait for the period shown in the error, then run the analysis again.")
+                    st.error(
+                        "The analysis could not complete. Check that GROQ_API_KEY is set "
+                        f"and try again. Details: {error}"
+                    )
+                    return
+                status.update(label="Analysis complete", state="complete")
+            answer = str(result["messages"][-1].content)
+            artifacts = [artifact.model_dump() for artifact in result.get("artifacts", [])]
+            trace = result.get("trace", [])
+            tool_results = [item.result or {"tool": item.tool, "message": item.message} for item in result.get("tool_results", [])]
+            response_cache.put(dataset_id, question, {"answer": answer, "artifacts": artifacts, "trace": trace, "tool_results": tool_results})
         st.subheader("Answer")
-        st.markdown(str(result["messages"][-1].content))
-        artifacts = result.get("artifacts", [])
+        st.markdown(answer)
         for artifact in artifacts:
-            if artifact.type == "CHART":
-                chart_path = PROJECT_ROOT / artifact.payload.get("chart_path", "")
-                if chart_path.is_file(): st.image(str(chart_path), caption=artifact.payload.get("title", "Chart"))
+            if artifact.get("type") == "CHART":
+                chart_path = PROJECT_ROOT / artifact.get("payload", {}).get("chart_path", "")
+                if chart_path.is_file(): st.image(str(chart_path), caption=artifact.get("payload", {}).get("title", "Chart"))
         with st.expander("Execution trace"):
-            st.code("\n".join(result.get("trace", [])))
+            st.code("\n".join(trace))
         with st.expander("Tool results"):
-            st.json([item.result or {"tool": item.tool, "message": item.message} for item in result.get("tool_results", [])])
+            st.json(tool_results)
 
 
 if __name__ == "__main__":
