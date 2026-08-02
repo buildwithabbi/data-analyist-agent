@@ -11,10 +11,10 @@ def make_manager(tmp_path):
     return MemoryManager(SQLiteMemoryRepository(tmp_path / "memory.db"))
 
 
-def semantic(content: str, *, tags=None):
+def semantic(content: str, *, tags=None, dataset="sales"):
     return SemanticMemory(
         content=content,
-        metadata=MemoryMetadata(tags=tags or ["sales"], dataset="sales", tool_chain=["run_sql"]),
+        metadata=MemoryMetadata(tags=tags or ["sales"], dataset=dataset, tool_chain=["run_sql"]),
         score=MemoryScorer().score(success=True, tool_count=1, has_summary=True, novel=True),
     )
 
@@ -29,6 +29,15 @@ def test_memory_manager_persists_filters_and_ranks(tmp_path):
     assert retrieved[0].id == stored.id
     assert retrieved[0].access_count == 1
     assert manager.search(tags=["customers"])[0].content.startswith("Customer")
+
+
+def test_memory_retrieval_is_isolated_by_dataset_fingerprint(tmp_path):
+    manager = make_manager(tmp_path)
+    first = manager.store(semantic("Monthly sales SQL groups by strftime month.", dataset="sha256:first"))
+    second = manager.store(semantic("Monthly sales SQL groups by strftime month.", dataset="sha256:second"))
+
+    assert [item.id for item in manager.retrieve("monthly sales", dataset="sha256:first")] == [first.id]
+    assert [item.id for item in manager.retrieve("monthly sales", dataset="sha256:second")] == [second.id]
 
 
 def test_memory_manager_rejects_duplicates_and_manages_lifecycle(tmp_path):

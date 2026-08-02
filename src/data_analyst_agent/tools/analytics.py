@@ -1,9 +1,12 @@
 import os
 import re
 import sqlite3
-import traceback
+import logging
+from contextvars import ContextVar
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 import pandas as pd
 from langchain_core.tools import tool
@@ -13,6 +16,8 @@ from ..utils.console import pretty_json, print_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DB_PATH = PROJECT_ROOT / "database" / "sales.db"
+_database_path: ContextVar[Path] = ContextVar("database_path", default=DB_PATH)
+logger = logging.getLogger(__name__)
 
 matplotlib_cache = PROJECT_ROOT / ".cache" / "matplotlib"
 matplotlib_cache.mkdir(parents=True, exist_ok=True)
@@ -40,8 +45,32 @@ class ChartSeries(BaseModel):
     data: list[ChartDataPoint]
 
 
+def set_database_path(path: str | Path | None = None) -> Path:
+    """Select the SQLite dataset for the current execution context.
+
+    A context variable keeps concurrent dashboard sessions from selecting one
+    another's database while retaining the bundled database as the default.
+    """
+    selected = Path(path) if path else DB_PATH
+    _database_path.set(selected)
+    return selected
+
+
+def _active_database_path() -> Path:
+    return _database_path.get()
+
+
+def active_dataset_id() -> str:
+    """Return a content fingerprint used to isolate durable memory by dataset."""
+    digest = sha256()
+    with _active_database_path().open("rb") as database:
+        for block in iter(lambda: database.read(1024 * 1024), b""):
+            digest.update(block)
+    return f"sha256:{digest.hexdigest()}"
+
+
 def get_schema_text():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_active_database_path())
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(sales)")
     cols = cursor.fetchall()
@@ -49,37 +78,26 @@ def get_schema_text():
     return "Table `sales` columns: " + ", ".join(c[1] for c in cols)
 
 
-@tool
-def calculator(expression: str) -> str:
-    """
-    Evaluate a mathematical expression.
-    Example:
-    25 * 12 + 10
-    """
-    try:
-        return str(eval(expression))
-    except Exception as e:
-        return str(e)
+_DENIED_SQLITE_ACTIONS = frozenset(
+    getattr(sqlite3, name)
+    for name in (
+        "SQLITE_INSERT", "SQLITE_UPDATE", "SQLITE_DELETE", "SQLITE_CREATE_INDEX",
+        "SQLITE_CREATE_TABLE", "SQLITE_CREATE_TEMP_INDEX", "SQLITE_CREATE_TEMP_TABLE",
+        "SQLITE_CREATE_TEMP_TRIGGER", "SQLITE_CREATE_TEMP_VIEW", "SQLITE_CREATE_TRIGGER",
+        "SQLITE_CREATE_VIEW", "SQLITE_CREATE_VTABLE", "SQLITE_DROP_INDEX",
+        "SQLITE_DROP_TABLE", "SQLITE_DROP_TEMP_INDEX", "SQLITE_DROP_TEMP_TABLE",
+        "SQLITE_DROP_TEMP_TRIGGER", "SQLITE_DROP_TEMP_VIEW", "SQLITE_DROP_TRIGGER",
+        "SQLITE_DROP_VIEW", "SQLITE_DROP_VTABLE", "SQLITE_ALTER_TABLE", "SQLITE_ATTACH",
+        "SQLITE_DETACH", "SQLITE_PRAGMA", "SQLITE_REINDEX", "SQLITE_ANALYZE",
+        "SQLITE_TRANSACTION", "SQLITE_SAVEPOINT",
+    )
+    if hasattr(sqlite3, name)
+)
 
 
-@tool
-def joke_generator() -> str:
-    """
-    Generate a random joke.
-    """
-    import random
-
-    # here can we create dynamic unique jokes using LLM or any other method?
-
-    jokes = [
-        "Why don't scientists trust atoms? Because they make up everything!",
-        "Why did the scarecrow win an award? Because he was outstanding in his field!",
-        "Why did the bicycle fall over? Because it was two-tired!",
-        "Why did the math book look sad? Because it had too many problems.",
-        "Why did the tomato turn red? Because it saw the salad dressing!",
-    ]
-
-    return random.choice(jokes)
+def _read_only_authorizer(action: int, _arg1: str | None, _arg2: str | None, _database: str | None, _source: str | None) -> int:
+    """Reject writes/admin operations regardless of SQL spelling or CTE shape."""
+    return sqlite3.SQLITE_DENY if action in _DENIED_SQLITE_ACTIONS else sqlite3.SQLITE_OK
 
 
 @tool
@@ -163,37 +181,13 @@ def run_sql(query: str) -> str:
             }
         )
 
-    blocked_keywords = {
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "ALTER",
-        "CREATE",
-        "TRUNCATE",
-        "REPLACE",
-        "ATTACH",
-        "DETACH",
-        "VACUUM",
-        "PRAGMA",
-    }
-
-    for keyword in blocked_keywords:
-        if keyword in query_upper:
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "run_sql",
-                    "message": f"Forbidden SQL keyword detected: {keyword}",
-                }
-            )
-
     conn = None
 
     try:
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(_active_database_path())
         conn.row_factory = sqlite3.Row
+        conn.set_authorizer(_read_only_authorizer)
 
         cursor = conn.cursor()
 
@@ -226,30 +220,21 @@ def run_sql(query: str) -> str:
         )
 
     except Exception as e:
+        logger.exception("Unexpected SQL tool failure")
 
         return pretty_json(
             {
                 "status": "error",
                 "tool": "run_sql",
                 "query": query,
-                "message": str(e),
+                "message": "Unexpected database execution error.",
                 "exception": type(e).__name__,
-                "traceback": traceback.format_exc(),
             }
         )
 
     finally:
         if conn is not None:
             conn.close()
-
-
-@tool
-def get_schema() -> str:
-    """
-    Return the database schema.
-    """
-    print_json("GET SCHEMA", {"database": str(DB_PATH)})
-    return get_schema_text()
 
 
 @tool
@@ -345,7 +330,7 @@ def generate_chart(
             charts_dir = PROJECT_ROOT / "charts"
             charts_dir.mkdir(exist_ok=True)
             safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
-            chart_path = charts_dir / f"{safe_title}.png"
+            chart_path = charts_dir / f"{safe_title or 'chart'}_{uuid4().hex}.png"
             fig.savefig(chart_path, dpi=300, bbox_inches="tight")
             return pretty_json(
                 {
@@ -366,30 +351,12 @@ def generate_chart(
 
         rows = [point.model_dump() for point in data]
 
-        if not isinstance(rows, list):
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "Input data must be a JSON array.",
-                }
-            )
-
         if not rows:
             return pretty_json(
                 {
                     "status": "error",
                     "tool": "generate_chart",
                     "message": "Input data is empty.",
-                }
-            )
-
-        if not all(isinstance(row, dict) for row in rows):
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "Each row must be a JSON object.",
                 }
             )
 
@@ -465,7 +432,7 @@ def generate_chart(
 
         safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
 
-        chart_path = charts_dir / f"{safe_title}.png"
+        chart_path = charts_dir / f"{safe_title or 'chart'}_{uuid4().hex}.png"
 
         fig.savefig(chart_path, dpi=300, bbox_inches="tight")
 
@@ -481,13 +448,13 @@ def generate_chart(
         )
 
     except Exception as e:
+        logger.exception("Chart generation failed")
         return pretty_json(
             {
                 "status": "error",
                 "tool": "generate_chart",
-                "message": str(e),
+                "message": "Chart generation failed.",
                 "exception": type(e).__name__,
-                "traceback": traceback.format_exc(),
             }
         )
 
@@ -497,9 +464,6 @@ def generate_chart(
 
 
 TOOLS = [
-    # get_schema,
     run_sql,
-    # calculator,
-    # joke_generator
     generate_chart,
 ]

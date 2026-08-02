@@ -15,7 +15,7 @@ from data_analyst_agent.domain.enums import (
     ExecutionStatus,
 )
 from data_analyst_agent.domain.models import Plan, RepairDecision
-from constants import MAX_REPAIR_ATTEMPTS
+from ..constants import MAX_REPAIR_ATTEMPTS
 
 
 class RepairService:

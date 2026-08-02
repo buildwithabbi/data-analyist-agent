@@ -32,7 +32,12 @@ class MemoryWriter:
             summary=summary,
             artifacts=[item.model_dump() for item in state.get("artifacts", [])],
             execution_trace=list(state.get("trace", [])),
-            metadata=MemoryMetadata(tool_chain=tools, dataset="sales", success=True, tags=["execution", *tools]),
+            metadata=MemoryMetadata(
+                tool_chain=tools,
+                dataset=state.get("dataset_id", "legacy:unknown"),
+                success=True,
+                tags=["execution", *tools],
+            ),
             score=score,
         )
         memory.content_hash = self.deduplicator.fingerprint(memory)

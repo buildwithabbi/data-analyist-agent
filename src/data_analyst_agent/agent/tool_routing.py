@@ -22,6 +22,6 @@ def route_tools(state):
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tool"
 
-    # The model has produced its final natural-language answer.  Persist any
-    # successful work from the run before ending the graph.
-    return "final"
+    # The model has produced its final natural-language answer. Route it to
+    # the validator, which the graph maps from ``end`` before reflection.
+    return "end"

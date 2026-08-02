@@ -2,6 +2,7 @@ from data_analyst_agent.platform.evaluation import EvaluationEngine
 from data_analyst_agent.platform.governance import GovernancePolicy
 from data_analyst_agent.platform.observability import ObservabilityManager
 from data_analyst_agent.platform.sdk import Platform
+from types import SimpleNamespace
 
 
 def test_evaluation_engine_reports_metrics():
@@ -36,8 +37,17 @@ def test_observability_tracks_spans_and_metrics():
     assert observability.get_trace("planner")[0]["name"] == "planner"
 
 
-def test_platform_run_returns_evaluations_and_trace_id():
+def test_platform_run_returns_evaluations_and_trace_id(monkeypatch):
     platform = Platform()
+    monkeypatch.setattr(
+        platform.orchestrator,
+        "run",
+        lambda *_args, **_kwargs: {
+            "status": "completed",
+            "response": "Repository summary.",
+            "context": SimpleNamespace(data={"plan": None}),
+        },
+    )
     result = platform.run("Summarize the repository")
 
     assert result["status"] == "completed"

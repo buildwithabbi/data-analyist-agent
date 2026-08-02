@@ -27,6 +27,9 @@ class AgentState(TypedDict):
     # Memory
     memory: NotRequired[list[MemoryItem]]
 
+    # Stable content fingerprint of the database used by this run.
+    dataset_id: NotRequired[str]
+
     # Retrieved, citable external knowledge for the current run.
     knowledge: NotRequired[list]
 

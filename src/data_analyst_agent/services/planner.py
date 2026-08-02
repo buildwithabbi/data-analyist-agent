@@ -48,8 +48,43 @@ can be part of retrieval. Do not include setup, pandas, Plotly, or manual
 data-cleaning steps.
 """
 
-from ..core.llm import llm
+from ..core.llm import llm, safe_invoke
 from ..domain.models import Plan, PlanStep
+
+
+def _default_plan(goal: str) -> Plan:
+    """Produce a valid minimal plan when a model returns empty/invalid JSON."""
+    lowered = goal.lower()
+    metrics = [metric for metric in ("sales", "profit", "quantity", "discount") if metric in lowered]
+    wants_chart = any(word in lowered for word in ("chart", "plot", "visual", "graph"))
+    steps: list[PlanStep] = [
+        PlanStep(
+            action="QUERY",
+            description="Retrieve the requested metrics in one SQLite query",
+            expected_tool="run_sql",
+            expected_output="structured rows for analysis",
+        )
+    ]
+    if wants_chart:
+        steps.append(
+            PlanStep(
+                action="GENERATE_CHART",
+                description="Visualize the retrieved metrics with an appropriate chart",
+                expected_tool="generate_chart",
+                expected_output="multi_series_line_chart" if len(metrics) > 1 else "chart",
+                requires=["run_sql"],
+                inputs=metrics,
+            )
+        )
+    steps.append(
+        PlanStep(
+            action="SUMMARIZE",
+            description="Summarize the findings using the retrieved evidence",
+            expected_output="grounded natural-language summary",
+            requires=["run_sql", *( ["generate_chart"] if wants_chart else [])],
+        )
+    )
+    return Plan(goal=goal, steps=steps)
 
 
 def _plan_from_response(goal: str, response_text: str) -> Plan:
@@ -70,27 +105,16 @@ def _plan_from_response(goal: str, response_text: str) -> Plan:
                 elif isinstance(step, str) and step.strip():
                     steps.append(step.strip())
             current_step = int(payload.get("current_step", 0))
-            return Plan(
-                goal=str(payload.get("goal") or goal).strip(),
-                steps=steps,
-                current_step=max(0, min(current_step, max(len(steps) - 1, 0))),
-            )
+            if steps:
+                return Plan(
+                    goal=str(payload.get("goal") or goal).strip(),
+                    steps=steps,
+                    current_step=max(0, min(current_step, max(len(steps) - 1, 0))),
+                )
     except (TypeError, ValueError, json.JSONDecodeError):
         pass
 
-    # Backward-compatible fallback if the model does not return JSON.
-    steps = []
-    for line in response_text.splitlines():
-        step = re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", line).strip()
-        if step:
-            steps.append(step)
-
-    # Preserve a useful plan even if the model does not follow the numbered
-    # response format exactly.
-    if not steps and response_text.strip():
-        steps = [response_text.strip()]
-
-    return Plan(goal=goal, steps=steps, current_step=0)
+    return _default_plan(goal)
 
 
 def create_plan(question: str, memories: list | None = None, knowledge: list | None = None) -> Plan:
@@ -119,6 +143,6 @@ def create_plan(question: str, memories: list | None = None, knowledge: list | N
         ("human", question),
     ]
 
-    response = llm.invoke(messages)
-
-    return _plan_from_response(question, response.content)
+    response = safe_invoke(llm, messages)
+    content = response.content if isinstance(response.content, str) else ""
+    return _plan_from_response(question, content)
