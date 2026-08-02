@@ -55,3 +55,52 @@ class EvaluationEngine:
             "latency": round(latency, 3),
             "metrics": metrics,
         }
+
+
+class RAGEvaluator:
+    """Computes RAG evaluation metrics: Faithfulness, Answer Relevance, and Context Recall."""
+
+    @classmethod
+    def evaluate_rag(cls, query: str, answer: str, retrieved_contexts: list[str]) -> dict[str, Any]:
+        """
+        Evaluate RAG performance metrics.
+        - Faithfulness: Groundedness of answer in retrieved context.
+        - Answer Relevance: Alignment of answer with user query.
+        - Context Recall: Sufficiency of retrieved context chunks.
+        """
+        if not retrieved_contexts:
+            return {
+                "faithfulness": 0.0,
+                "answer_relevance": 0.0,
+                "context_recall": 0.0,
+                "overall_rag_score": 0.0,
+                "retrieved_chunks_count": 0,
+                "reason": "No context chunks retrieved.",
+            }
+
+        query_words = set(query.lower().split())
+        answer_words = set(answer.lower().split())
+        combined_context = " ".join(retrieved_contexts).lower()
+        context_words = set(combined_context.split())
+
+        # 1. Faithfulness (Grounding of answer words in context)
+        overlap_with_context = len(answer_words & context_words) / max(1, len(answer_words))
+        faithfulness = round(min(1.0, 0.4 + (0.6 * overlap_with_context)), 3)
+
+        # 2. Answer Relevance (Alignment of answer with query)
+        overlap_with_query = len(query_words & answer_words) / max(1, len(query_words))
+        answer_relevance = round(min(1.0, 0.5 + (0.5 * overlap_with_query)), 3)
+
+        # 3. Context Recall (Coverage of query tokens in context)
+        context_recall = round(len(query_words & context_words) / max(1, len(query_words)), 3)
+
+        overall_score = round(0.4 * faithfulness + 0.4 * answer_relevance + 0.2 * context_recall, 3)
+
+        return {
+            "faithfulness": faithfulness,
+            "answer_relevance": answer_relevance,
+            "context_recall": context_recall,
+            "overall_rag_score": overall_score,
+            "retrieved_chunks_count": len(retrieved_contexts),
+        }
+

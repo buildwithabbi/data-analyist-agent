@@ -21,6 +21,8 @@ from langchain_core.messages import HumanMessage
 
 from data_analyst_agent.agent.graph import graph
 from data_analyst_agent.core.llm import MODEL_NAME
+from data_analyst_agent.security.guardrails import SecurityGuardrails
+from data_analyst_agent.vision.analyzer import VisionAnalyzer
 from data_analyst_agent.services.datasets import arrow_safe_preview, load_tabular_dataset
 from data_analyst_agent.services.response_cache import response_cache
 from data_analyst_agent.tools.analytics import PROJECT_ROOT, active_dataset_id, set_database_path
@@ -431,6 +433,18 @@ def main() -> None:
 
         st.divider()
 
+        # Multi-Modal Vision Section
+        st.header("👁️ Multi-Modal Vision")
+        v_img = st.file_uploader("Upload Chart / Screenshot", type=["png", "jpg", "jpeg"])
+        if v_img:
+            v_res = VisionAnalyzer.analyze_chart_or_spreadsheet(v_img.getvalue(), filename=v_img.name)
+            if v_res["status"] == "success":
+                st.image(v_img, caption=f"Loaded {v_img.name}", use_container_width=True)
+                st.caption(f"**Res**: {v_res['metadata']['width']}x{v_res['metadata']['height']}px | **Size**: {v_res['metadata']['size_kb']} KB")
+                st.success("✅ Multi-modal image payload processed.")
+
+        st.divider()
+
         # Dataset Metadata Card
         if ds_info["exists"]:
             st.subheader("📊 Active Dataset Summary")
@@ -506,6 +520,19 @@ def main() -> None:
 
     # --- AGENT EXECUTION ---
     if run_analysis:
+        # Step 0: Security Guardrails Evaluation
+        guard_res = SecurityGuardrails.evaluate_prompt(question)
+        if not guard_res.is_safe:
+            if guard_res.intent == "MALICIOUS_INJECTION":
+                st.error(f"🛡️ Security Blocked: {guard_res.reason}")
+            else:
+                st.warning(f"⚠️ Guardrail Warning: {guard_res.reason}")
+            return
+
+        question = guard_res.sanitized_text
+        if "Masked PII" in guard_res.reason:
+            st.info(f"🛡️ Security Info: {guard_res.reason}")
+
         set_database_path(st.session_state.database_path)
         dataset_id = active_dataset_id()
         cached = None if refresh else response_cache.get(dataset_id, question)
