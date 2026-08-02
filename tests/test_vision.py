@@ -31,3 +31,14 @@ def test_vision_analyzer_chart_processing():
     assert res["filename"] == "test_chart.png"
     assert "data_url_preview" in res
     assert res["metadata"]["width"] == 200
+
+
+def test_ollama_vision_provider_structure():
+    from data_analyst_agent.vision.analyzer import OllamaVisionProvider
+    raw = _create_sample_image_bytes()
+    b64 = ImageProcessor.encode_image(raw)
+    res = OllamaVisionProvider.analyze_image_with_ollama(b64, model="llava")
+    assert "provider" in res
+    assert res["provider"] == "Ollama"
+    assert res["model"] == "llava"
+
