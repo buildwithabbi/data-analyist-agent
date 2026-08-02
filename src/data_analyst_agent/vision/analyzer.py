@@ -62,3 +62,46 @@ class VisionAnalyzer:
                 "Image payload formatted for multimodal analysis."
             ),
         }
+
+
+class OllamaVisionProvider:
+    """Local Ollama Vision LLM provider (llava / llama3.2-vision)."""
+
+    DEFAULT_MODEL = "llava"  # or "llama3.2-vision"
+    OLLAMA_URL = "http://localhost:11434/api/generate"
+
+    @classmethod
+    def analyze_image_with_ollama(
+        cls, image_b64: str, prompt: str = "Extract tabular data and key metrics from this image", model: str = DEFAULT_MODEL
+    ) -> Dict[str, Any]:
+        """Calls local Ollama vision endpoint with base64 image payload."""
+        try:
+            import urllib.request
+
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "images": [image_b64],
+                "stream": False,
+            }
+            req = urllib.request.Request(
+                cls.OLLAMA_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                return {
+                    "status": "success",
+                    "provider": "Ollama",
+                    "model": model,
+                    "analysis": result.get("response", "No text returned."),
+                }
+        except Exception as err:
+            return {
+                "status": "error",
+                "provider": "Ollama",
+                "model": model,
+                "error": f"Ollama connection info: {err}. (Run 'ollama run {model}' to enable local vision).",
+            }
+
