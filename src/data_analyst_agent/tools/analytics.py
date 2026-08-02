@@ -72,10 +72,18 @@ def active_dataset_id() -> str:
 def get_schema_text():
     conn = sqlite3.connect(_active_database_path())
     cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(sales)")
-    cols = cursor.fetchall()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+    tables = [row[0] for row in cursor.fetchall()]
+    if not tables:
+        conn.close()
+        return "No tables found in active database."
+    schema_parts = []
+    for table in tables:
+        cursor.execute(f"PRAGMA table_info({table})")
+        cols = cursor.fetchall()
+        schema_parts.append(f"Table `{table}` columns: " + ", ".join(c[1] for c in cols))
     conn.close()
-    return "Table `sales` columns: " + ", ".join(c[1] for c in cols)
+    return "\n".join(schema_parts)
 
 
 _DENIED_SQLITE_ACTIONS = frozenset(

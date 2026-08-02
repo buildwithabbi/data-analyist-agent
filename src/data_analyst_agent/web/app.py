@@ -219,6 +219,74 @@ def _clear_session_history() -> None:
     st.session_state.history = []
 
 
+def _get_all_cached_questions() -> pd.DataFrame:
+    """Fetch all historical asked questions from SQLite response_cache.db."""
+    cache_path = PROJECT_ROOT / "memory" / "response_cache.db"
+    if not cache_path.exists():
+        return pd.DataFrame()
+    try:
+        with sqlite3.connect(cache_path) as conn:
+            df = pd.read_sql_query(
+                "SELECT created_at as 'Asked At (UTC)', question as 'Question', dataset_id as 'Dataset ID' FROM response_cache ORDER BY created_at DESC",
+                conn
+            )
+            return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _get_all_durable_memories() -> pd.DataFrame:
+    """Fetch all stored durable memory items from SQLite agent_memory.db."""
+    mem_path = PROJECT_ROOT / "memory" / "agent_memory.db"
+    if not mem_path.exists():
+        return pd.DataFrame()
+    try:
+        with sqlite3.connect(mem_path) as conn:
+            df = pd.read_sql_query(
+                "SELECT id, kind as 'Kind', lifecycle as 'Lifecycle', metadata_json, score_json FROM memories",
+                conn
+            )
+            parsed_rows = []
+            for _, row in df.iterrows():
+                meta = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
+                score = json.loads(row["score_json"]) if row["score_json"] else {}
+                parsed_rows.append({
+                    "Memory ID": str(row["id"])[:8] + "...",
+                    "Kind": str(row["Kind"]),
+                    "Tags": ", ".join(meta.get("tags", [])) if meta.get("tags") else "general",
+                    "Dataset": meta.get("dataset", "global"),
+                    "Importance Score": score.get("importance", 0.5),
+                    "Tool Chain": ", ".join(meta.get("tool_chain", [])) if meta.get("tool_chain") else "-"
+                })
+            return pd.DataFrame(parsed_rows)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _clear_response_cache_db() -> None:
+    """Callback to clear response cache database."""
+    cache_path = PROJECT_ROOT / "memory" / "response_cache.db"
+    if cache_path.exists():
+        try:
+            with sqlite3.connect(cache_path) as conn:
+                conn.execute("DELETE FROM response_cache")
+                conn.commit()
+        except Exception:
+            pass
+
+
+def _discover_all_project_databases() -> list[Path]:
+    """Find all SQLite database files (.db) across the project repository."""
+    discovered = []
+    search_dirs = [PROJECT_ROOT / "database", PROJECT_ROOT / "memory", PROJECT_ROOT / "knowledge"]
+    for s_dir in search_dirs:
+        if s_dir.exists():
+            for p in s_dir.rglob("*.db"):
+                if p.is_file() and p not in discovered:
+                    discovered.append(p)
+    return sorted(discovered, key=lambda x: x.name)
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Agentic AI Data Analyst Hub",
@@ -419,11 +487,12 @@ def main() -> None:
         res = st.session_state.current_result
         st.divider()
 
-        tab_brief, tab_explorer, tab_reasoning, tab_export = st.tabs([
+        tab_brief, tab_explorer, tab_reasoning, tab_export, tab_db_inspector = st.tabs([
             "💡 Executive Brief & Visuals",
             "📊 Data Explorer",
             "🛠️ Agent Reasoning & SQL",
-            "📜 History & Export Report"
+            "📜 History & Export Report",
+            "🗄️ Databases & Memory"
         ])
 
         # TAB 1: EXECUTIVE BRIEF & VISUALS
@@ -584,6 +653,113 @@ def main() -> None:
                         )
             else:
                 st.info("No prior queries recorded in this session. Run your first query above to build history!")
+
+        # TAB 5: SYSTEM DATABASES & MEMORY INSPECTOR
+        with tab_db_inspector:
+            st.markdown("### 🗄️ System Database & Durable Memory Inspector")
+            st.caption("Inspect persisted asked questions, SQLite response caches, and long-term agent memories.")
+
+            # Section 1: Asked Questions & Response Cache Database
+            st.markdown("#### ❓ Persisted Asked Questions & Cache (`response_cache.db`)")
+            cached_df = _get_all_cached_questions()
+            if not cached_df.empty:
+                st.caption(f"Total cached question entries: **{len(cached_df)}**")
+                
+                # Search filter
+                q_search = st.text_input("🔍 Search asked questions log:", placeholder="Filter by question keyword...")
+                display_q_df = cached_df
+                if q_search:
+                    mask = display_q_df["Question"].astype(str).str.contains(q_search, case=False)
+                    display_q_df = display_q_df[mask]
+                
+                safe_display_dataframe(display_q_df, max_rows=100, hide_index=True)
+                
+                if st.button("🗑️ Clear SQLite Response Cache", on_click=_clear_response_cache_db):
+                    st.success("Response cache cleared!")
+                    st.rerun()
+            else:
+                st.info("No asked questions found in response_cache.db yet.")
+
+            st.divider()
+
+            # Section 2: Agent Durable Memories
+            st.markdown("#### 🧠 Long-Term Durable Memories (`agent_memory.db`)")
+            memories_df = _get_all_durable_memories()
+            if not memories_df.empty:
+                st.caption(f"Total stored durable memories: **{len(memories_df)}**")
+                safe_display_dataframe(memories_df, max_rows=100, hide_index=True)
+            else:
+                st.info("No durable memories recorded in agent_memory.db yet.")
+
+            st.divider()
+
+            # Section 3: Database Storage Metrics
+            st.markdown("#### 📁 System Storage Summary")
+            db_cols = st.columns(3)
+            sales_db_p = PROJECT_ROOT / "database" / "sales.db"
+            cache_db_p = PROJECT_ROOT / "memory" / "response_cache.db"
+            agent_mem_p = PROJECT_ROOT / "memory" / "agent_memory.db"
+
+            with db_cols[0]:
+                st.markdown("**Sales Database** (`sales.db`)")
+                if sales_db_p.exists():
+                    st.caption(f"Size: {sales_db_p.stat().st_size / (1024*1024):.2f} MB")
+                    st.caption(f"Records: {ds_info['rows']:,}")
+            with db_cols[1]:
+                st.markdown("**Response Cache** (`response_cache.db`)")
+                if cache_db_p.exists():
+                    st.caption(f"Size: {cache_db_p.stat().st_size / 1024:.1f} KB")
+                    st.caption(f"Questions Cached: {len(cached_df)}")
+            st.divider()
+
+            # Section 4: Universal Multi-Database Explorer & SQL Sandbox
+            st.markdown("#### 🔍 Universal Project Database Explorer")
+            st.caption("Select any `.db` file in the project to inspect tables, view rows, or run custom read-only SQL queries.")
+            
+            all_dbs = _discover_all_project_databases()
+            if all_dbs:
+                db_map = {f"📁 {p.name} ({p.relative_to(PROJECT_ROOT)})": p for p in all_dbs}
+                selected_db_label = st.selectbox("Choose Database File to Inspect:", list(db_map.keys()))
+                selected_db_path = db_map[selected_db_label]
+
+                if selected_db_path.exists():
+                    with sqlite3.connect(selected_db_path) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+                        tables = [r[0] for r in cursor.fetchall()]
+
+                    if tables:
+                        sel_table = st.selectbox(f"Select Table inside `{selected_db_path.name}`:", tables)
+                        with sqlite3.connect(selected_db_path) as conn:
+                            table_df = pd.read_sql_query(f"SELECT * FROM {sel_table}", conn)
+                        
+                        st.caption(f"Table `{sel_table}`: **{len(table_df):,}** rows × **{len(table_df.columns)}** columns")
+                        safe_display_dataframe(table_df, max_rows=100, hide_index=True)
+
+                        # Custom SQL Query Sandbox
+                        st.markdown(f"##### ⚡ SQL Query Console for `{selected_db_path.name}`")
+                        custom_sql = st.text_area(
+                            "Execute Custom SELECT Query:",
+                            value=f"SELECT * FROM {sel_table} LIMIT 10;",
+                            height=70,
+                            key=f"sql_input_{selected_db_path.name}"
+                        )
+                        if st.button("▶️ Execute Query", key=f"btn_sql_{selected_db_path.name}", type="primary"):
+                            sql_trim = custom_sql.strip().upper()
+                            if sql_trim.startswith("SELECT") or sql_trim.startswith("WITH"):
+                                try:
+                                    with sqlite3.connect(selected_db_path) as conn:
+                                        res_df = pd.read_sql_query(custom_sql, conn)
+                                    st.success(f"Query returned {len(res_df):,} rows.")
+                                    safe_display_dataframe(res_df, max_rows=100, hide_index=True)
+                                except Exception as err:
+                                    st.error(f"SQL Error: {err}")
+                            else:
+                                st.warning("Only read-only SELECT or WITH statements are allowed.")
+                    else:
+                        st.info(f"Database file `{selected_db_path.name}` has no tables yet.")
+            else:
+                st.info("No SQLite database files found in project.")
 
 
 if __name__ == "__main__":

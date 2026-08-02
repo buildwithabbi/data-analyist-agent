@@ -1,3 +1,5 @@
+from datetime import datetime
+from uuid import uuid4
 from pydantic.dataclasses import dataclass
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -112,12 +114,12 @@ def _normalise_step(step: PlanStep | str) -> PlanStep:
     )
 
 
-@dataclass(kw_only=True)
-class MemoryItem:
+class MemoryItem(BaseModel):
+    id: str = Field(default_factory=lambda: uuid4().hex)
     content: str
-    importance: float = Field(ge=0.0, le=1.0)
-    category: str
-    timestamp: str
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    category: str = "general"
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 
