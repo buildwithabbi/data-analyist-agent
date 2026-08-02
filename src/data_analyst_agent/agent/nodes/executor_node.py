@@ -1,6 +1,8 @@
 """Executor workflow node."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from uuid import uuid4
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...core.llm import llm, safe_invoke
 from ...domain.enums import StepStatus
@@ -120,8 +122,43 @@ def executor(state: AgentState) -> dict:
             "trace": trace,
         }
 
+    response = None
+    if step.expected_tool == "generate_chart":
+        # Chart inputs are fully determined by the validated SQL artifact.
+        # Calling the LLM again adds latency/cost without adding a decision.
+        if step.expected_output == "multi_series_line_chart":
+            chart_series = _chart_series_from_results(state, step.inputs)
+            if not chart_series:
+                return {
+                    "step_validation_error": (
+                        "Multi-series chart generation requires prior SQL rows for: "
+                        f"{', '.join(step.inputs)}."
+                    ),
+                    "trace": trace,
+                }
+            chart_args = {"chart_type": "line", "title": step.description, "series": chart_series}
+        else:
+            chart_data = _chart_data_from_results(state, step.description)
+            if not chart_data:
+                return {
+                    "step_validation_error": "Chart generation requires prior run_sql rows with label and value fields.",
+                    "trace": trace,
+                }
+            chart_args = {"chart_type": "line", "title": step.description, "data": chart_data}
+        response = AIMessage(
+            content="",
+            tool_calls=[{"name": "generate_chart", "args": chart_args, "id": f"chart_{uuid4().hex}", "type": "tool_call"}],
+        )
+
     context = build_context(state)
-    if step.expected_tool:
+    # The compact context already carries the relevant plan, results, memory,
+    # and knowledge. Replaying every historical AI/tool message duplicates SQL
+    # rows and quickly exhausts provider token-per-minute limits.
+    user_message = next(
+        (message for message in reversed(state["messages"]) if isinstance(message, HumanMessage)),
+        HumanMessage(content="Continue the planned analysis."),
+    )
+    if step.expected_tool and response is None:
         # Tool selection is deterministic: the plan contract selects exactly
         # one tool. The model may provide only that tool's arguments.
         tool = next((candidate for candidate in TOOLS if candidate.name == step.expected_tool), None)
@@ -142,7 +179,10 @@ def executor(state: AgentState) -> dict:
                 "a time/category label column plus numeric aggregate aliases for: "
                 f"{aliases}. Do not return a single generic `value` column."
             )
-        model = llm.bind_tools([tool], tool_choice="required")
+        # Some smaller Groq models reject provider-level forced tool choice
+        # even with a single bound tool. The executor still validates that the
+        # only permitted tool is called, so leave selection to the model API.
+        model = llm.bind_tools([tool])
         messages = [
             SystemMessage(
                 content=(
@@ -154,9 +194,9 @@ def executor(state: AgentState) -> dict:
                     f"{downstream_instruction}"
                 )
             ),
-            *state["messages"],
+            user_message,
         ]
-    else:
+    elif not step.expected_tool:
         # Tool-call messages make providers treat a final synthesis as a tool
         # continuation. The full execution context already contains the user
         # question and tool outputs, so omit that protocol history here.
@@ -173,10 +213,8 @@ def executor(state: AgentState) -> dict:
             HumanMessage(content="Provide the final answer now."),
         ]
 
-    response = safe_invoke(
-        model,
-        messages,
-    )
+    if response is None:
+        response = safe_invoke(model, messages)
 
     print("\n===== TOOL CALLS =====")
 
@@ -198,6 +236,10 @@ def executor(state: AgentState) -> dict:
         updates["step_validation_error"] = (
             f"Step '{step.description}' requires a {step.expected_tool} tool call."
         )
+        updates["repair_needed"] = True
+        updates["repair_reason"] = (
+            f"The provider did not emit a tool call for {step.expected_tool}."
+        )
         return updates
 
     if step.expected_tool and (
@@ -207,6 +249,10 @@ def executor(state: AgentState) -> dict:
         updates["step_validation_error"] = (
             f"Step '{step.description}' permits exactly one "
             f"{step.expected_tool} call."
+        )
+        updates["repair_needed"] = True
+        updates["repair_reason"] = (
+            f"The provider returned an unexpected tool call for {step.expected_tool}."
         )
         return updates
 

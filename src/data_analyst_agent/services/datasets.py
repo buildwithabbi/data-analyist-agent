@@ -2,10 +2,20 @@
 
 import re
 import sqlite3
+import os
+import tempfile
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
+
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_DATASET_ROWS = 500_000
+MAX_DATASET_COLUMNS = 200
+MAX_EXCEL_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_EXCEL_ARCHIVE_MEMBERS = 500
 
 
 def _column_name(value: str, index: int) -> str:
@@ -13,18 +23,39 @@ def _column_name(value: str, index: int) -> str:
     return name or f"column_{index}"
 
 
+def _validate_excel_archive(content: bytes) -> None:
+    """Reject XLSX archives that would expand beyond local resource limits."""
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_EXCEL_ARCHIVE_MEMBERS:
+                raise ValueError("The Excel file has too many archive entries.")
+            if sum(member.file_size for member in members) > MAX_EXCEL_UNCOMPRESSED_BYTES:
+                raise ValueError("The Excel file expands beyond the 100 MB limit.")
+    except zipfile.BadZipFile as error:
+        raise ValueError("The XLSX upload is not a valid Excel archive.") from error
+
+
 def load_tabular_dataset(content: bytes, filename: str, destination: str | Path) -> tuple[Path, int, list[str]]:
     """Load a CSV or Excel upload into a new SQLite ``sales`` table."""
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise ValueError("The upload exceeds the 20 MB limit.")
     suffix = Path(filename).suffix.lower()
     stream = BytesIO(content)
     if suffix == ".csv":
         frame = pd.read_csv(stream)
     elif suffix in {".xlsx", ".xls"}:
+        if suffix == ".xlsx":
+            _validate_excel_archive(content)
         frame = pd.read_excel(stream)
     else:
         raise ValueError("Upload a CSV, XLS, or XLSX file.")
     if frame.empty:
         raise ValueError("The uploaded dataset has no rows.")
+    if len(frame) > MAX_DATASET_ROWS:
+        raise ValueError(f"The dataset exceeds the {MAX_DATASET_ROWS:,}-row limit.")
+    if len(frame.columns) > MAX_DATASET_COLUMNS:
+        raise ValueError(f"The dataset exceeds the {MAX_DATASET_COLUMNS}-column limit.")
     columns, seen = [], set()
     for index, column in enumerate(frame.columns, start=1):
         base, candidate, suffix_index = _column_name(column, index), "", 1
@@ -36,10 +67,16 @@ def load_tabular_dataset(content: bytes, filename: str, destination: str | Path)
     frame.columns = columns
     target = Path(destination)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target.unlink()
-    with sqlite3.connect(target) as connection:
-        frame.to_sql("sales", connection, index=False, if_exists="replace")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.stem}_", suffix=".db", dir=target.parent)
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    try:
+        with sqlite3.connect(temporary_path) as connection:
+            frame.to_sql("sales", connection, index=False, if_exists="replace")
+        os.replace(temporary_path, target)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
     return target, len(frame), columns
 
 

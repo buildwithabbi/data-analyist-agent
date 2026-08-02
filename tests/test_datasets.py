@@ -1,7 +1,9 @@
 import sqlite3
 
 import pandas as pd
+import pytest
 
+from data_analyst_agent.services import datasets
 from data_analyst_agent.services.datasets import arrow_safe_preview, load_tabular_dataset
 
 
@@ -25,3 +27,10 @@ def test_preview_normalizes_mixed_numeric_object_columns():
     assert str(preview["aging"].dtype) == "float64"
     assert preview["aging"].isna().sum() == 1
     assert str(preview["name"].dtype) == "string"
+
+
+def test_upload_size_limit_is_enforced(tmp_path, monkeypatch):
+    monkeypatch.setattr(datasets, "MAX_UPLOAD_BYTES", 4)
+
+    with pytest.raises(ValueError, match="20 MB"):
+        load_tabular_dataset(b"a,b\n1,2\n", "data.csv", tmp_path / "uploaded.db")

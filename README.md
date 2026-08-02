@@ -22,6 +22,9 @@ pip install -r requirements.txt
 ```
 # Agentic AI Data Analyst
 
+Project documentation: [Project Guide](docs/project-guide.md) and
+[Architecture](docs/architecture.md).
+
 ## Web dashboard
 
 Install dependencies, then launch the Streamlit interface from the repository
@@ -41,3 +44,6 @@ The CLI remains available for scripted usage:
 ```bash
 python app.py "Show monthly sales trends"
 ```
+
+The current Groq model is `llama-3.3-70b-versatile`. To select another model,
+change the `MODEL_NAME` assignment in `src/data_analyst_agent/core/llm.py`.

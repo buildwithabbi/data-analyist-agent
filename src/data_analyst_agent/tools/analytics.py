@@ -1,11 +1,11 @@
 import os
-import ast
-import operator
 import re
 import sqlite3
-import traceback
+import logging
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 import pandas as pd
 from langchain_core.tools import tool
@@ -15,7 +15,8 @@ from ..utils.console import pretty_json, print_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DB_PATH = PROJECT_ROOT / "database" / "sales.db"
-ACTIVE_DB_PATH = DB_PATH
+_database_path: ContextVar[Path] = ContextVar("database_path", default=DB_PATH)
+logger = logging.getLogger(__name__)
 
 matplotlib_cache = PROJECT_ROOT / ".cache" / "matplotlib"
 matplotlib_cache.mkdir(parents=True, exist_ok=True)
@@ -43,42 +44,23 @@ class ChartSeries(BaseModel):
     data: list[ChartDataPoint]
 
 
-_OPERATORS = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.FloorDiv: operator.floordiv,
-    ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
-    ast.USub: operator.neg,
-    ast.UAdd: operator.pos,
-}
-
-
-def _evaluate_expression(expression: str) -> int | float:
-    """Evaluate arithmetic only; names, calls, attributes, and indexing are rejected."""
-    def visit(node: ast.AST) -> int | float:
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-            return node.value
-        if isinstance(node, ast.BinOp) and type(node.op) in _OPERATORS:
-            return _OPERATORS[type(node.op)](visit(node.left), visit(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPERATORS:
-            return _OPERATORS[type(node.op)](visit(node.operand))
-        raise ValueError("Only numeric arithmetic expressions are allowed.")
-
-    return visit(ast.parse(expression, mode="eval").body)
-
-
 def set_database_path(path: str | Path | None = None) -> Path:
-    """Select the SQLite dataset used by the analytical tools."""
-    global ACTIVE_DB_PATH
-    ACTIVE_DB_PATH = Path(path) if path else DB_PATH
-    return ACTIVE_DB_PATH
+    """Select the SQLite dataset for the current execution context.
+
+    A context variable keeps concurrent dashboard sessions from selecting one
+    another's database while retaining the bundled database as the default.
+    """
+    selected = Path(path) if path else DB_PATH
+    _database_path.set(selected)
+    return selected
+
+
+def _active_database_path() -> Path:
+    return _database_path.get()
 
 
 def get_schema_text():
-    conn = sqlite3.connect(ACTIVE_DB_PATH)
+    conn = sqlite3.connect(_active_database_path())
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(sales)")
     cols = cursor.fetchall()
@@ -86,37 +68,26 @@ def get_schema_text():
     return "Table `sales` columns: " + ", ".join(c[1] for c in cols)
 
 
-@tool
-def calculator(expression: str) -> str:
-    """
-    Evaluate a mathematical expression.
-    Example:
-    25 * 12 + 10
-    """
-    try:
-        return str(_evaluate_expression(expression))
-    except (SyntaxError, TypeError, ValueError, ZeroDivisionError) as error:
-        return f"Invalid expression: {error}"
+_DENIED_SQLITE_ACTIONS = frozenset(
+    getattr(sqlite3, name)
+    for name in (
+        "SQLITE_INSERT", "SQLITE_UPDATE", "SQLITE_DELETE", "SQLITE_CREATE_INDEX",
+        "SQLITE_CREATE_TABLE", "SQLITE_CREATE_TEMP_INDEX", "SQLITE_CREATE_TEMP_TABLE",
+        "SQLITE_CREATE_TEMP_TRIGGER", "SQLITE_CREATE_TEMP_VIEW", "SQLITE_CREATE_TRIGGER",
+        "SQLITE_CREATE_VIEW", "SQLITE_CREATE_VTABLE", "SQLITE_DROP_INDEX",
+        "SQLITE_DROP_TABLE", "SQLITE_DROP_TEMP_INDEX", "SQLITE_DROP_TEMP_TABLE",
+        "SQLITE_DROP_TEMP_TRIGGER", "SQLITE_DROP_TEMP_VIEW", "SQLITE_DROP_TRIGGER",
+        "SQLITE_DROP_VIEW", "SQLITE_DROP_VTABLE", "SQLITE_ALTER_TABLE", "SQLITE_ATTACH",
+        "SQLITE_DETACH", "SQLITE_PRAGMA", "SQLITE_REINDEX", "SQLITE_ANALYZE",
+        "SQLITE_TRANSACTION", "SQLITE_SAVEPOINT",
+    )
+    if hasattr(sqlite3, name)
+)
 
 
-@tool
-def joke_generator() -> str:
-    """
-    Generate a random joke.
-    """
-    import random
-
-    # here can we create dynamic unique jokes using LLM or any other method?
-
-    jokes = [
-        "Why don't scientists trust atoms? Because they make up everything!",
-        "Why did the scarecrow win an award? Because he was outstanding in his field!",
-        "Why did the bicycle fall over? Because it was two-tired!",
-        "Why did the math book look sad? Because it had too many problems.",
-        "Why did the tomato turn red? Because it saw the salad dressing!",
-    ]
-
-    return random.choice(jokes)
+def _read_only_authorizer(action: int, _arg1: str | None, _arg2: str | None, _database: str | None, _source: str | None) -> int:
+    """Reject writes/admin operations regardless of SQL spelling or CTE shape."""
+    return sqlite3.SQLITE_DENY if action in _DENIED_SQLITE_ACTIONS else sqlite3.SQLITE_OK
 
 
 @tool
@@ -200,37 +171,13 @@ def run_sql(query: str) -> str:
             }
         )
 
-    blocked_keywords = {
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "ALTER",
-        "CREATE",
-        "TRUNCATE",
-        "REPLACE",
-        "ATTACH",
-        "DETACH",
-        "VACUUM",
-        "PRAGMA",
-    }
-
-    for keyword in blocked_keywords:
-        if keyword in query_upper:
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "run_sql",
-                    "message": f"Forbidden SQL keyword detected: {keyword}",
-                }
-            )
-
     conn = None
 
     try:
 
-        conn = sqlite3.connect(ACTIVE_DB_PATH)
+        conn = sqlite3.connect(_active_database_path())
         conn.row_factory = sqlite3.Row
+        conn.set_authorizer(_read_only_authorizer)
 
         cursor = conn.cursor()
 
@@ -263,30 +210,21 @@ def run_sql(query: str) -> str:
         )
 
     except Exception as e:
+        logger.exception("Unexpected SQL tool failure")
 
         return pretty_json(
             {
                 "status": "error",
                 "tool": "run_sql",
                 "query": query,
-                "message": str(e),
+                "message": "Unexpected database execution error.",
                 "exception": type(e).__name__,
-                "traceback": traceback.format_exc(),
             }
         )
 
     finally:
         if conn is not None:
             conn.close()
-
-
-@tool
-def get_schema() -> str:
-    """
-    Return the database schema.
-    """
-    print_json("GET SCHEMA", {"database": str(ACTIVE_DB_PATH)})
-    return get_schema_text()
 
 
 @tool
@@ -382,7 +320,7 @@ def generate_chart(
             charts_dir = PROJECT_ROOT / "charts"
             charts_dir.mkdir(exist_ok=True)
             safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
-            chart_path = charts_dir / f"{safe_title}.png"
+            chart_path = charts_dir / f"{safe_title or 'chart'}_{uuid4().hex}.png"
             fig.savefig(chart_path, dpi=300, bbox_inches="tight")
             return pretty_json(
                 {
@@ -403,30 +341,12 @@ def generate_chart(
 
         rows = [point.model_dump() for point in data]
 
-        if not isinstance(rows, list):
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "Input data must be a JSON array.",
-                }
-            )
-
         if not rows:
             return pretty_json(
                 {
                     "status": "error",
                     "tool": "generate_chart",
                     "message": "Input data is empty.",
-                }
-            )
-
-        if not all(isinstance(row, dict) for row in rows):
-            return pretty_json(
-                {
-                    "status": "error",
-                    "tool": "generate_chart",
-                    "message": "Each row must be a JSON object.",
                 }
             )
 
@@ -502,7 +422,7 @@ def generate_chart(
 
         safe_title = re.sub(r"[^\w-]", "_", title).strip("_")
 
-        chart_path = charts_dir / f"{safe_title}.png"
+        chart_path = charts_dir / f"{safe_title or 'chart'}_{uuid4().hex}.png"
 
         fig.savefig(chart_path, dpi=300, bbox_inches="tight")
 
@@ -518,13 +438,13 @@ def generate_chart(
         )
 
     except Exception as e:
+        logger.exception("Chart generation failed")
         return pretty_json(
             {
                 "status": "error",
                 "tool": "generate_chart",
-                "message": str(e),
+                "message": "Chart generation failed.",
                 "exception": type(e).__name__,
-                "traceback": traceback.format_exc(),
             }
         )
 
@@ -534,9 +454,6 @@ def generate_chart(
 
 
 TOOLS = [
-    # get_schema,
     run_sql,
-    # calculator,
-    # joke_generator
     generate_chart,
 ]

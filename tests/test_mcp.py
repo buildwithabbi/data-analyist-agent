@@ -9,11 +9,14 @@ class FakeTransport(MCPTransport):
     def close(self): self.connected = False
     def list_tools(self): return [{"name":"search_repo", "description":"Search files", "inputSchema":{"type":"object"}}]
     def call_tool(self, name, arguments): return {"name": name, "arguments": arguments}
+    def list_resources(self): return [{"uri": "repo://readme", "name": "README"}]
+    def read_resource(self, uri): return {"uri": uri, "contents": "hello"}
 
 def test_mcp_manager_discovers_and_calls_capability():
     manager = MCPManager(); transport = FakeTransport()
     manager.connect(MCPServerConfig(id="filesystem", required_permissions={Permission.READ}), transport)
     assert manager.registry.capabilities()[0].name == "search_repo"
     assert manager.call_tool("search_repo", {"query":"TODO"})["arguments"]["query"] == "TODO"
+    assert manager.read_resource("repo://readme")["contents"] == "hello"
     assert manager.metrics()["filesystem"].calls == 1
     manager.shutdown(); assert transport.connected is False

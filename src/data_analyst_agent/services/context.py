@@ -1,7 +1,12 @@
 from langchain_core.messages import HumanMessage
 
-from ..tools import TOOLS, get_schema_text
+from ..tools import get_schema_text
 from ..utils.console import pretty_json
+
+
+def _compact(value: object, limit: int = 900) -> str:
+    text = str(value)
+    return text if len(text) <= limit else f"{text[:limit]}… [truncated]"
 
 
 def build_context(state):
@@ -38,12 +43,6 @@ def build_context(state):
 
     schema = get_schema_text()
 
-    tool_names = "\n".join(
-        f"- {tool.name}"
-        for tool in TOOLS
-        if tool.name != "get_schema"
-    )
-
     sections = []
 
     # ---------------------------------------------------------
@@ -57,10 +56,6 @@ You are an expert SQLite Data Analyst.
 Database Schema:
 
 {schema}
-
-Available Tools:
-
-{tool_names}
 
 Execution Plan:
 
@@ -77,18 +72,9 @@ Rules:
 - Only generate SQLite SQL.
 - Always present final results as a natural-language summary or markdown table, never raw JSON.
 - Generate charts using 'generate_chart' if the user requests a chart.
-- The chart must be saved in the 'charts' directory and the path included in the final answer.
-- To prepare a chart, first query a compact dataset with exactly two aliases:
-  `label` (text) and `value` (numeric). For example, use
-  `strftime('%Y-%m', order_date) AS label, SUM(sales) AS value`.
-- Call `generate_chart` only after that SQL result is available. Its `data`
-  argument must be an array of {{"label": "...", "value": number}} objects.
-
-Tool Usage Rules:
-1. Call ONLY ONE tool at a time.
-2. Wait for the tool result before deciding the next tool.
-3. Never call multiple dependent tools in one response.
-4. Think → Tool → Observe → Think Again.
+- Use only one tool call at a time and wait for its result.
+- For ordinary charts, query `label` and numeric `value`; use explicit metric
+  aliases when the plan requires a multi-series chart.
 """
     )
 
@@ -131,24 +117,27 @@ Repair Rules:
 
         sections.append("Relevant Long-Term Memory:")
 
-        for item in memory:
+        for item in memory[:3]:
             # Durable records are the primary shape. The fallback keeps
             # context construction compatible with older in-session items.
             if hasattr(item, "metadata"):
                 sections.append(
                     f"- [{item.kind.value}, importance={item.score.importance:.2f}, "
-                    f"confidence={item.score.confidence:.2f}] {item.content}"
+                    f"confidence={item.score.confidence:.2f}] {_compact(item.content, 350)}"
                 )
             else:
                 sections.append(
                     f"- [{item.category}, importance={item.importance:.2f}] "
-                    f"{item.content} ({item.timestamp})"
+                    f"{_compact(item.content, 350)} ({item.timestamp})"
                 )
 
     knowledge = state.get("knowledge", [])
     if knowledge:
         sections.append("Relevant Knowledge (cite these sources in final responses):")
-        sections.extend(f"- [{hit.citation}; confidence={hit.score:.2f}] {hit.chunk.text}" for hit in knowledge)
+        sections.extend(
+            f"- [{hit.citation}; confidence={hit.score:.2f}] {_compact(hit.chunk.text, 450)}"
+            for hit in knowledge[:3]
+        )
 
     # ---------------------------------------------------------
     # Execution History
@@ -168,11 +157,7 @@ Status : {tool.status}
 """
 
             if tool.result:
-                section += f"""
-
-Result:
-{pretty_json(tool.result)}
-"""
+                section += f"\nResult:\n{_compact(pretty_json(tool.result), 1200)}\n"
 
             if tool.message:
                 section += f"""

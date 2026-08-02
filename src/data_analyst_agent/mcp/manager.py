@@ -26,6 +26,16 @@ class MCPManager:
         capability = self.registry.tools[name]
         return self.sessions[capability.server_id].call_tool(name, arguments)
 
+    def read_resource(self, uri):
+        """Read a registered MCP resource through its connected server."""
+        resource = self.registry.resources[uri]
+        session = self.sessions.get(resource.server_id)
+        if session is None:
+            raise RuntimeError(f"MCP server {resource.server_id!r} is not connected.")
+        if session.status.name != "CONNECTED":
+            session.connect()
+        return session.transport.read_resource(uri)
+
     def discover(self):
         return self.registry.capabilities()
 
