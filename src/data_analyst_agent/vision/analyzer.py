@@ -6,6 +6,7 @@ base64 encoding, table extraction from screenshots, and visual chart analysis.
 
 import base64
 import io
+import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 from PIL import Image
@@ -42,26 +43,98 @@ class VisionAnalyzer:
 
     @classmethod
     def analyze_chart_or_spreadsheet(
-        cls, image_bytes: bytes, filename: str = "chart.png", prompt: str = "Extract key metrics and data tables"
+        cls, image_bytes: bytes, filename: str = "chart.png", prompt: str = "Extract key metrics and data tables", model: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Analyze an uploaded screenshot or chart image and return structured insights."""
+        """Analyze an uploaded screenshot or chart image using Groq Cloud or local Ollama."""
         meta = ImageProcessor.inspect_image(image_bytes)
         if "error" in meta:
             return {"status": "error", "message": meta["error"]}
 
         b64_data = ImageProcessor.encode_image(image_bytes)
-        data_url = f"data:image/{meta.get('format', 'png').lower()};base64,{b64_data}"
+        mime_fmt = meta.get('format', 'png').lower()
+        if mime_fmt == "jpg":
+            mime_fmt = "jpeg"
+        data_url = f"data:image/{mime_fmt};base64,{b64_data}"
+
+        # 1. Try Groq Cloud Vision first (zero local RAM usage)
+        groq_res = GroqVisionProvider.analyze_image_with_groq(data_url, prompt=prompt)
+        if groq_res.get("status") == "success":
+            return {
+                "status": "success",
+                "filename": filename,
+                "metadata": meta,
+                "data_url_preview": data_url[:50] + "...",
+                "extracted_insight": groq_res.get("analysis", ""),
+                "provider_info": groq_res,
+            }
+
+        # 2. Fallback to local Ollama (llava)
+        ollama_model = model or OllamaVisionProvider.DEFAULT_MODEL
+        ollama_res = OllamaVisionProvider.analyze_image_with_ollama(b64_data, prompt=prompt, model=ollama_model)
+
+        if ollama_res.get("status") == "success":
+            insight = ollama_res.get("analysis", "")
+        else:
+            insight = (
+                f"Multi-modal vision processed `{filename}` ({meta['width']}x{meta['height']}px, {meta['size_kb']} KB). "
+                f"Groq Vision note: {groq_res.get('error', 'N/A')}. "
+                f"Ollama status: {ollama_res.get('error', 'Ollama offline')}."
+            )
 
         return {
             "status": "success",
             "filename": filename,
             "metadata": meta,
             "data_url_preview": data_url[:50] + "...",
-            "extracted_insight": (
-                f"Multi-modal vision processed `{filename}` ({meta['width']}x{meta['height']}px, {meta['size_kb']} KB). "
-                "Image payload formatted for multimodal analysis."
-            ),
+            "extracted_insight": insight,
+            "provider_info": ollama_res,
         }
+
+
+class GroqVisionProvider:
+    """Groq Cloud Vision provider (llama-3.2-11b-vision-preview / llama-3.2-90b-vision-preview)."""
+
+    DEFAULT_MODEL = "llama-3.2-11b-vision-preview"
+
+    @classmethod
+    def analyze_image_with_groq(
+        cls, data_url: str, prompt: str = "Extract tabular data and key metrics from this image", model: str = DEFAULT_MODEL
+    ) -> Dict[str, Any]:
+        """Calls Groq Cloud vision endpoint with base64 image data URL."""
+        try:
+            from ..core.config import GROQ_API_KEY
+            if not GROQ_API_KEY:
+                return {"status": "error", "provider": "Groq", "error": "GROQ_API_KEY not configured in environment."}
+
+            from langchain_groq import ChatGroq
+            from langchain_core.messages import HumanMessage
+
+            groq_llm = ChatGroq(
+                model=model,
+                api_key=GROQ_API_KEY,
+                temperature=0,
+                max_tokens=512,
+            )
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]
+            )
+            response = groq_llm.invoke([message])
+            return {
+                "status": "success",
+                "provider": "Groq Cloud",
+                "model": model,
+                "analysis": str(response.content),
+            }
+        except Exception as err:
+            return {
+                "status": "error",
+                "provider": "Groq Cloud",
+                "model": model,
+                "error": f"Groq Vision error: {err}",
+            }
 
 
 class OllamaVisionProvider:

@@ -510,6 +510,8 @@ def main() -> None:
                 st.image(v_img, caption=f"Loaded {v_img.name}", use_container_width=True)
                 st.caption(f"**Res**: {v_res['metadata']['width']}x{v_res['metadata']['height']}px | **Size**: {v_res['metadata']['size_kb']} KB")
                 st.success("✅ Multi-modal image payload processed.")
+                with st.expander("👁️ AI Vision Analysis", expanded=True):
+                    st.write(v_res.get("extracted_insight", "No analysis content."))
 
         st.divider()
 
