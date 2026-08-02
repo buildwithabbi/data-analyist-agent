@@ -85,7 +85,7 @@ def arrow_safe_preview(frame: pd.DataFrame) -> pd.DataFrame:
     preview = frame.copy()
     for column in preview.select_dtypes(include="object").columns:
         values = preview[column]
-        non_empty = values.replace(r"^\s*$", pd.NA, regex=True)
+        non_empty = values.replace(r"^\s*$", pd.NA, regex=True).infer_objects(copy=False)
         numeric = pd.to_numeric(non_empty, errors="coerce")
         # Retain a numeric dtype only when every meaningful value is numeric.
         if non_empty.notna().sum() == numeric.notna().sum():

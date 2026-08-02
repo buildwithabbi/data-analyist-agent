@@ -1,16 +1,10 @@
-from pydantic.dataclasses import dataclass
-from datetime import datetime
+"""Backward-compatible entry point forwarding to data_analyst_agent.domain.models."""
 
-@dataclass
-class ToolResult:
-    tool: str
-    status: str
-    result: dict | None
-    message: str | None
+import sys
+from pathlib import Path
 
+SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-@dataclass
-class MemoryItem:
-    timestamp: str
-    category: str
-    content: str
+from data_analyst_agent.domain.models import *
