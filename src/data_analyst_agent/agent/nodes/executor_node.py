@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from ...core.llm import llm, safe_invoke
+from ...core.llm import extract_token_usage, llm, safe_invoke
 from ...domain.enums import StepStatus
 from ...domain.models import Artifact, ExecutionRecord, Plan
 from ...services.context import build_context
@@ -215,6 +215,10 @@ def executor(state: AgentState) -> dict:
 
     if response is None:
         response = safe_invoke(model, messages)
+
+    tokens = extract_token_usage(response)
+    if tokens["total_tokens"] > 0:
+        trace.append(f"🪙 Step Tokens: {tokens['input_tokens']} in, {tokens['output_tokens']} out ({tokens['total_tokens']} total)")
 
     print("\n===== TOOL CALLS =====")
 
