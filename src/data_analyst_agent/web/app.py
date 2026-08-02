@@ -226,13 +226,52 @@ def _get_all_cached_questions() -> pd.DataFrame:
         return pd.DataFrame()
     try:
         with sqlite3.connect(cache_path) as conn:
-            df = pd.read_sql_query(
-                "SELECT created_at as 'Asked At (UTC)', question as 'Question', dataset_id as 'Dataset ID' FROM response_cache ORDER BY created_at DESC",
-                conn
-            )
-            return df
+            cursor = conn.cursor()
+            cursor.execute("SELECT created_at, question, dataset_id, payload_json FROM response_cache ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            parsed = []
+            for r in rows:
+                p_json = json.loads(r[3]) if r[3] else {}
+                toks = p_json.get("token_usage", {})
+                tot_tok = toks.get("total_tokens", 0)
+                parsed.append({
+                    "Asked At (UTC)": r[0],
+                    "Question": r[1],
+                    "Tokens Used": f"{tot_tok:,}" if tot_tok > 0 else "-",
+                    "Dataset ID": r[2][:16] + "..."
+                })
+            return pd.DataFrame(parsed)
     except Exception:
         return pd.DataFrame()
+
+
+def _calculate_run_tokens(messages: list, trace: list) -> dict:
+    """Calculate cumulative input, output, and total tokens consumed in the current run."""
+    import re
+    input_t, output_t, total_t = 0, 0, 0
+    if messages:
+        for msg in messages:
+            if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                um = msg.usage_metadata
+                input_t += um.get("input_tokens", 0)
+                output_t += um.get("output_tokens", 0)
+                total_t += um.get("total_tokens", 0)
+            elif hasattr(msg, "response_metadata") and msg.response_metadata:
+                tu = msg.response_metadata.get("token_usage", {})
+                if tu:
+                    input_t += tu.get("prompt_tokens", tu.get("input_tokens", 0))
+                    output_t += tu.get("completion_tokens", tu.get("output_tokens", 0))
+                    total_t += tu.get("total_tokens", 0)
+    
+    if total_t == 0 and trace:
+        for line in trace:
+            match = re.search(r"🪙 Step Tokens: (\d+) in, (\d+) out \((\d+) total\)", str(line))
+            if match:
+                input_t += int(match.group(1))
+                output_t += int(match.group(2))
+                total_t += int(match.group(3))
+
+    return {"input_tokens": input_t, "output_tokens": output_t, "total_tokens": total_t}
 
 
 def _get_all_durable_memories() -> pd.DataFrame:
@@ -259,6 +298,32 @@ def _get_all_durable_memories() -> pd.DataFrame:
                     "Tool Chain": ", ".join(meta.get("tool_chain", [])) if meta.get("tool_chain") else "-"
                 })
             return pd.DataFrame(parsed_rows)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _get_all_knowledge_documents() -> pd.DataFrame:
+    """Fetch all stored knowledge documents and vector chunks from SQLite knowledge.db."""
+    kn_path = PROJECT_ROOT / "knowledge" / "knowledge.db"
+    if not kn_path.exists():
+        return pd.DataFrame()
+    try:
+        with sqlite3.connect(kn_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT payload FROM chunks")
+            rows = cursor.fetchall()
+            parsed = []
+            for r in rows:
+                c_json = json.loads(r[0]) if r[0] else {}
+                meta = c_json.get("metadata", {})
+                parsed.append({
+                    "Chunk ID": str(c_json.get("id", ""))[:8] + "...",
+                    "Source Title": meta.get("source", "inline"),
+                    "Tags": meta.get("tags", "general"),
+                    "Chunk Text": c_json.get("text", ""),
+                    "Vector Dim": len(c_json.get("embedding", []))
+                })
+            return pd.DataFrame(parsed)
     except Exception:
         return pd.DataFrame()
 
@@ -447,8 +512,12 @@ def main() -> None:
 
         if cached:
             st.info("⚡ Returned cached response for this dataset & query. Check 'Bypass cache' to force rerun.")
-            answer, artifacts, trace, tool_results = (
-                cached["answer"], cached.get("artifacts", []), cached.get("trace", []), cached.get("tool_results", []),
+            answer, artifacts, trace, tool_results, token_usage = (
+                cached["answer"],
+                cached.get("artifacts", []),
+                cached.get("trace", []),
+                cached.get("tool_results", []),
+                cached.get("token_usage", _calculate_run_tokens([], cached.get("trace", [])))
             )
         else:
             with st.status("🧠 Planning, querying SQL database, validating & generating insights...", expanded=True) as status:
@@ -466,7 +535,15 @@ def main() -> None:
             artifacts = [artifact.model_dump() for artifact in result.get("artifacts", [])]
             trace = result.get("trace", [])
             tool_results = [item.result or {"tool": item.tool, "message": item.message} for item in result.get("tool_results", [])]
-            response_cache.put(dataset_id, question, {"answer": answer, "artifacts": artifacts, "trace": trace, "tool_results": tool_results})
+            token_usage = _calculate_run_tokens(result.get("messages", []), trace)
+            
+            response_cache.put(dataset_id, question, {
+                "answer": answer,
+                "artifacts": artifacts,
+                "trace": trace,
+                "tool_results": tool_results,
+                "token_usage": token_usage
+            })
 
         # Save to session history
         sql_queries = _extract_sql_queries(tool_results)
@@ -477,7 +554,8 @@ def main() -> None:
             "artifacts": artifacts,
             "trace": trace,
             "tool_results": tool_results,
-            "sql_queries": sql_queries
+            "sql_queries": sql_queries,
+            "token_usage": token_usage
         }
         st.session_state.history.append(item_entry)
         st.session_state.current_result = item_entry
@@ -551,6 +629,18 @@ def main() -> None:
         with tab_reasoning:
             st.markdown("### 🛠️ Agent Execution & SQL Inspector")
             
+            # Token Usage Metrics Card
+            toks = res.get("token_usage", {})
+            if not toks or toks.get("total_tokens", 0) == 0:
+                toks = _calculate_run_tokens([], res.get("trace", []))
+            
+            st.markdown("#### 🪙 Token Consumption Breakdown")
+            t_col1, t_col2, t_col3 = st.columns(3)
+            t_col1.metric("Prompt / Input Tokens", f"{toks.get('input_tokens', 0):,}")
+            t_col2.metric("Completion / Output Tokens", f"{toks.get('output_tokens', 0):,}")
+            t_col3.metric("Total Tokens Consumed", f"{toks.get('total_tokens', 0):,}")
+            st.markdown("---")
+
             # SQL Queries Section
             if res["sql_queries"]:
                 st.markdown("#### ⚡ Executed SQL Queries")
@@ -626,12 +716,12 @@ def main() -> None:
             with h_head_col2:
                 if st.session_state.history:
                     st.button("🗑️ Clear History", on_click=_clear_session_history, use_container_width=True)
-
             if st.session_state.history:
                 for item_idx, item in enumerate(reversed(st.session_state.history), start=1):
-                    # Card container for each history entry
+                    item_toks = item.get("token_usage", {}).get("total_tokens", 0)
+                    tok_str = f" | 🪙 {item_toks:,} tokens" if item_toks > 0 else ""
                     with st.expander(
-                        f"🕒 [{item['timestamp']}] {item['question']}",
+                        f"🕒 [{item['timestamp']}] {item['question']}{tok_str}",
                         expanded=(item_idx == 1)
                     ):
                         st.markdown(f"**Query**: {item['question']}")
@@ -688,8 +778,16 @@ def main() -> None:
             if not memories_df.empty:
                 st.caption(f"Total stored durable memories: **{len(memories_df)}**")
                 safe_display_dataframe(memories_df, max_rows=100, hide_index=True)
+            st.divider()
+
+            # Section 3: RAG Knowledge Base Chunks & Vector Store
+            st.markdown("#### 📚 RAG Knowledge Base Chunks & Vector Store (`knowledge.db`)")
+            knowledge_df = _get_all_knowledge_documents()
+            if not knowledge_df.empty:
+                st.caption(f"Total stored vector chunks: **{len(knowledge_df)}**")
+                safe_display_dataframe(knowledge_df, max_rows=100, hide_index=True)
             else:
-                st.info("No durable memories recorded in agent_memory.db yet.")
+                st.info("No vector knowledge chunks stored in knowledge.db yet.")
 
             st.divider()
 
@@ -712,9 +810,9 @@ def main() -> None:
                     st.caption(f"Questions Cached: {len(cached_df)}")
             st.divider()
 
-            # Section 4: Universal Multi-Database Explorer & SQL Sandbox
-            st.markdown("#### 🔍 Universal Project Database Explorer")
-            st.caption("Select any `.db` file in the project to inspect tables, view rows, or run custom read-only SQL queries.")
+            # Section 4: Built-in Web SQLiteStudio
+            st.markdown("#### 🛠️ Built-in Web SQLiteStudio")
+            st.caption("Inspect tables, DDL schemas, column data types, and run custom SQL queries across all project databases.")
             
             all_dbs = _discover_all_project_databases()
             if all_dbs:
@@ -730,32 +828,56 @@ def main() -> None:
 
                     if tables:
                         sel_table = st.selectbox(f"Select Table inside `{selected_db_path.name}`:", tables)
-                        with sqlite3.connect(selected_db_path) as conn:
-                            table_df = pd.read_sql_query(f"SELECT * FROM {sel_table}", conn)
                         
-                        st.caption(f"Table `{sel_table}`: **{len(table_df):,}** rows × **{len(table_df.columns)}** columns")
-                        safe_display_dataframe(table_df, max_rows=100, hide_index=True)
+                        st_sub1, st_sub2, st_sub3 = st.tabs(["📊 Data Browser", "📐 Schema & DDL", "⚡ Interactive SQL Console"])
+                        
+                        with st_sub1:
+                            page_size = st.select_slider("Rows to display:", options=[10, 25, 50, 100, 500], value=50, key=f"ps_{selected_db_path.name}")
+                            with sqlite3.connect(selected_db_path) as conn:
+                                cnt_df = pd.read_sql_query(f"SELECT COUNT(*) as cnt FROM {sel_table}", conn)
+                                total_r = cnt_df["cnt"].iloc[0]
+                                table_df = pd.read_sql_query(f"SELECT * FROM {sel_table} LIMIT {page_size}", conn)
+                            
+                            st.caption(f"Showing first **{len(table_df):,}** of **{total_r:,}** total rows in `{sel_table}`")
+                            safe_display_dataframe(table_df, max_rows=page_size, hide_index=True)
 
-                        # Custom SQL Query Sandbox
-                        st.markdown(f"##### ⚡ SQL Query Console for `{selected_db_path.name}`")
-                        custom_sql = st.text_area(
-                            "Execute Custom SELECT Query:",
-                            value=f"SELECT * FROM {sel_table} LIMIT 10;",
-                            height=70,
-                            key=f"sql_input_{selected_db_path.name}"
-                        )
-                        if st.button("▶️ Execute Query", key=f"btn_sql_{selected_db_path.name}", type="primary"):
-                            sql_trim = custom_sql.strip().upper()
-                            if sql_trim.startswith("SELECT") or sql_trim.startswith("WITH"):
-                                try:
-                                    with sqlite3.connect(selected_db_path) as conn:
-                                        res_df = pd.read_sql_query(custom_sql, conn)
-                                    st.success(f"Query returned {len(res_df):,} rows.")
-                                    safe_display_dataframe(res_df, max_rows=100, hide_index=True)
-                                except Exception as err:
-                                    st.error(f"SQL Error: {err}")
-                            else:
-                                st.warning("Only read-only SELECT or WITH statements are allowed.")
+                        with st_sub2:
+                            with sqlite3.connect(selected_db_path) as conn:
+                                cur = conn.cursor()
+                                cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (sel_table,))
+                                ddl_row = cur.fetchone()
+                                ddl_text = ddl_row[0] if ddl_row else "-- DDL unavailable"
+                                
+                                col_info_df = pd.read_sql_query(f"PRAGMA table_info({sel_table})", conn)
+                            
+                            st.markdown("**Table DDL Statement:**")
+                            st.code(ddl_text, language="sql")
+                            
+                            st.markdown("**Column Schema & Data Types:**")
+                            safe_display_dataframe(col_info_df, max_rows=100, hide_index=True)
+
+                        with st_sub3:
+                            custom_sql = st.text_area(
+                                "Execute Custom Read-Only Query:",
+                                value=f"SELECT * FROM {sel_table} LIMIT 10;",
+                                height=80,
+                                key=f"sql_input_{selected_db_path.name}"
+                            )
+                            if st.button("▶️ Execute Query", key=f"btn_sql_{selected_db_path.name}", type="primary"):
+                                sql_trim = custom_sql.strip().upper()
+                                if sql_trim.startswith("SELECT") or sql_trim.startswith("WITH") or sql_trim.startswith("PRAGMA") or sql_trim.startswith("EXPLAIN"):
+                                    try:
+                                        import time
+                                        t0 = time.time()
+                                        with sqlite3.connect(selected_db_path) as conn:
+                                            res_df = pd.read_sql_query(custom_sql, conn)
+                                        t1 = time.time()
+                                        st.success(f"Query returned **{len(res_df):,}** rows in **{(t1-t0)*1000:.1f} ms**.")
+                                        safe_display_dataframe(res_df, max_rows=100, hide_index=True)
+                                    except Exception as err:
+                                        st.error(f"SQL Execution Error: {err}")
+                                else:
+                                    st.warning("Only read-only SELECT, WITH, PRAGMA, or EXPLAIN statements are permitted.")
                     else:
                         st.info(f"Database file `{selected_db_path.name}` has no tables yet.")
             else:

@@ -81,4 +81,27 @@ def safe_invoke(model, messages):
         return AIMessage(content="", tool_calls=[])
 
 
+def extract_token_usage(message) -> dict:
+    """Extract input, output, and total token usage from an AIMessage."""
+    if not message:
+        return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    if hasattr(message, "usage_metadata") and message.usage_metadata:
+        um = message.usage_metadata
+        return {
+            "input_tokens": um.get("input_tokens", 0),
+            "output_tokens": um.get("output_tokens", 0),
+            "total_tokens": um.get("total_tokens", 0),
+        }
+    if hasattr(message, "response_metadata") and message.response_metadata:
+        tu = message.response_metadata.get("token_usage", {})
+        if tu:
+            return {
+                "input_tokens": tu.get("prompt_tokens", tu.get("input_tokens", 0)),
+                "output_tokens": tu.get("completion_tokens", tu.get("output_tokens", 0)),
+                "total_tokens": tu.get("total_tokens", 0),
+            }
+    return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
 llm_with_tools = llm.bind_tools(TOOLS)
+
